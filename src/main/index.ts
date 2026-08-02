@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { addProject, listProjects, removeProject } from './projectRegistry'
-import { createAgent, listAgents } from './agents'
+import { createAgent, listAgents, readAgentPrompt, updateAgent } from './agents'
+import { listDeskLayout, setDeskAppearance, setDeskPosition } from './deskLayout'
 import { checkClaudeCli } from './claudeCli'
 import { ensureSession, getSession, interruptSession, loadHistory, sendPrompt } from './sessions'
 import { generateAgents } from './agentGenerator'
@@ -55,6 +56,32 @@ function registerIpcHandlers(): void {
     'agents:create',
     (_e, args: { projectPath: string; input: NewAgentInput }) =>
       createAgent(args.projectPath, args.input)
+  )
+
+  ipcMain.handle(
+    'agents:update',
+    (_e, args: { filePath: string; input: NewAgentInput }) =>
+      updateAgent(args.filePath, args.input)
+  )
+
+  ipcMain.handle(
+    'agents:readPrompt',
+    (_e, args: { projectPath: string; agentName: string }) =>
+      readAgentPrompt(args.projectPath, args.agentName)
+  )
+
+  ipcMain.handle('deskLayout:list', (_e, projectId: string) => listDeskLayout(projectId))
+
+  ipcMain.handle(
+    'deskLayout:setPosition',
+    (_e, args: { projectId: string; agentName: string; x: number; y: number }) =>
+      setDeskPosition(args.projectId, args.agentName, args.x, args.y)
+  )
+
+  ipcMain.handle(
+    'deskLayout:setAppearance',
+    (_e, args: { projectId: string; agentName: string; suitColor?: string; deskColor?: string }) =>
+      setDeskAppearance(args.projectId, args.agentName, args.suitColor, args.deskColor)
   )
 
   ipcMain.handle('claude:cliStatus', () => checkClaudeCli())

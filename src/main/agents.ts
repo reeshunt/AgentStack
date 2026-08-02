@@ -126,3 +126,32 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
     filePath
   }
 }
+
+export async function updateAgent(
+  filePath: string,
+  input: NewAgentInput
+): Promise<AgentInfo> {
+  const frontmatterLines = [
+    '---',
+    `name: ${yamlString(input.name)}`,
+    `description: ${yamlString(input.description)}`,
+    `model: ${yamlString(input.model)}`,
+    `color: ${yamlString(input.color)}`
+  ]
+  if (input.icon) frontmatterLines.push(`icon: ${yamlString(input.icon)}`)
+  if (input.department) frontmatterLines.push(`department: ${yamlString(input.department)}`)
+  frontmatterLines.push('---', '')
+
+  const file = frontmatterLines.join('\n') + input.systemPrompt.trim() + '\n'
+  await writeFile(filePath, file, 'utf-8')
+
+  return {
+    name: input.name,
+    description: input.description,
+    model: input.model,
+    color: input.color,
+    icon: input.icon ?? FALLBACK_ICONS[input.color] ?? input.name[0]?.toUpperCase(),
+    department: input.department,
+    filePath
+  }
+}

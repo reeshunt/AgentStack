@@ -45,6 +45,16 @@ db.exec(`
     agent_name TEXT NOT NULL,
     PRIMARY KEY (group_id, agent_name)
   );
+
+  CREATE TABLE IF NOT EXISTS desk_layout (
+    project_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    x REAL,
+    y REAL,
+    suit_color TEXT,
+    desk_color TEXT,
+    PRIMARY KEY (project_id, agent_name)
+  );
 `)
 
 migrateLegacyJsonStores()

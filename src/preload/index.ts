@@ -3,6 +3,7 @@ import type {
   AgentGroup,
   AgentInfo,
   ClaudeCliStatus,
+  DeskLayout,
   GenerateEvent,
   NewAgentInput,
   PermissionMode,
@@ -22,6 +23,29 @@ const api = {
 
   createAgent: (projectPath: string, input: NewAgentInput): Promise<AgentInfo> =>
     ipcRenderer.invoke('agents:create', { projectPath, input }),
+
+  updateAgent: (filePath: string, input: NewAgentInput): Promise<AgentInfo> =>
+    ipcRenderer.invoke('agents:update', { filePath, input }),
+
+  readAgentPrompt: (
+    projectPath: string,
+    agentName: string
+  ): Promise<{ systemPrompt: string; tools?: string[] } | undefined> =>
+    ipcRenderer.invoke('agents:readPrompt', { projectPath, agentName }),
+
+  listDeskLayout: (projectId: string): Promise<DeskLayout[]> =>
+    ipcRenderer.invoke('deskLayout:list', projectId),
+
+  setDeskPosition: (projectId: string, agentName: string, x: number, y: number): Promise<void> =>
+    ipcRenderer.invoke('deskLayout:setPosition', { projectId, agentName, x, y }),
+
+  setDeskAppearance: (
+    projectId: string,
+    agentName: string,
+    suitColor?: string,
+    deskColor?: string
+  ): Promise<void> =>
+    ipcRenderer.invoke('deskLayout:setAppearance', { projectId, agentName, suitColor, deskColor }),
 
   claudeCliStatus: (): Promise<ClaudeCliStatus> => ipcRenderer.invoke('claude:cliStatus'),
 

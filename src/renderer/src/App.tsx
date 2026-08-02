@@ -3,6 +3,7 @@ import type {
   AgentGroup,
   AgentInfo,
   ClaudeCliStatus,
+  DeskLayout,
   NewAgentInput,
   PermissionMode,
   Project,
@@ -12,6 +13,7 @@ import { sessionKey } from '../../shared/types'
 import DeskGrid from './components/DeskGrid'
 import ChatPanel from './components/ChatPanel'
 import AddAgentDialog from './components/AddAgentDialog'
+import EditAgentDialog from './components/EditAgentDialog'
 import GenerateAgentsDialog from './components/GenerateAgentsDialog'
 import NameGroupDialog from './components/NameGroupDialog'
 import QuotaBadge from './components/QuotaBadge'
@@ -35,6 +37,8 @@ export default function App(): React.JSX.Element {
   const [chatLogs, setChatLogs] = useState<Record<string, ChatItem[]>>({})
   const [hydratedKeys, setHydratedKeys] = useState<Record<string, boolean>>({})
   const [showAddAgent, setShowAddAgent] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<AgentInfo | null>(null)
+  const [deskLayoutByProject, setDeskLayoutByProject] = useState<Record<string, DeskLayout[]>>({})
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
   const [generateProjectId, setGenerateProjectId] = useState<string | null>(null)
   const [generateItems, setGenerateItems] = useState<ChatItem[]>([])
@@ -169,6 +173,60 @@ export default function App(): React.JSX.Element {
     refreshGroups(selectedProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject, groupsByProject])
+
+  function refreshDeskLayout(projectId: string): void {
+    window.agentstack.listDeskLayout(projectId).then((layout) => {
+      setDeskLayoutByProject((prev) => ({ ...prev, [projectId]: layout }))
+    })
+  }
+
+  useEffect(() => {
+    if (!selectedProject) return
+    if (deskLayoutByProject[selectedProject.id]) return
+    refreshDeskLayout(selectedProject.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject, deskLayoutByProject])
+
+  function handleMoveDesk(agentName: string, x: number, y: number): void {
+    if (!selectedProject) return
+    const projectId = selectedProject.id
+    window.agentstack.setDeskPosition(projectId, agentName, x, y)
+    setDeskLayoutByProject((prev) => {
+      const existing = prev[projectId] ?? []
+      const idx = existing.findIndex((l) => l.agentName === agentName)
+      const next =
+        idx >= 0
+          ? existing.map((l, i) => (i === idx ? { ...l, x, y } : l))
+          : [...existing, { agentName, x, y }]
+      return { ...prev, [projectId]: next }
+    })
+  }
+
+  async function handleUpdateAgent(filePath: string, input: NewAgentInput): Promise<void> {
+    if (!selectedProject) return
+    await window.agentstack.updateAgent(filePath, input)
+    refreshAgents(selectedProject.id, selectedProject.path)
+    setEditingAgent(null)
+  }
+
+  async function handleUpdateAppearance(
+    agentName: string,
+    suitColor?: string,
+    deskColor?: string
+  ): Promise<void> {
+    if (!selectedProject) return
+    const projectId = selectedProject.id
+    await window.agentstack.setDeskAppearance(projectId, agentName, suitColor, deskColor)
+    setDeskLayoutByProject((prev) => {
+      const existing = prev[projectId] ?? []
+      const idx = existing.findIndex((l) => l.agentName === agentName)
+      const next =
+        idx >= 0
+          ? existing.map((l, i) => (i === idx ? { ...l, suitColor, deskColor } : l))
+          : [...existing, { agentName, suitColor, deskColor }]
+      return { ...prev, [projectId]: next }
+    })
+  }
 
   const agents = selectedProject ? (agentsByProject[selectedProject.id] ?? []) : []
   const selectedAgent = agents.find((a) => a.name === selectedAgentName) ?? null
@@ -319,6 +377,9 @@ export default function App(): React.JSX.Element {
           onRemoveProject={handleRemoveProject}
           onSelectAgent={handleSelectAgent}
           onAddAgent={() => setShowAddAgent(true)}
+          onEditAgent={(agent) => setEditingAgent(agent)}
+          layout={selectedProject ? (deskLayoutByProject[selectedProject.id] ?? []) : []}
+          onMoveDesk={handleMoveDesk}
           onGenerateAgents={handleGenerateAgents}
           generating={generating && generateProjectId === selectedProject?.id}
           groups={groups}
@@ -351,6 +412,21 @@ export default function App(): React.JSX.Element {
 
       {showAddAgent && (
         <AddAgentDialog onCancel={() => setShowAddAgent(false)} onCreate={handleCreateAgent} />
+      )}
+
+      {editingAgent && selectedProject && (
+        <EditAgentDialog
+          agent={editingAgent}
+          projectPath={selectedProject.path}
+          layout={
+            (deskLayoutByProject[selectedProject.id] ?? []).find(
+              (l) => l.agentName === editingAgent.name
+            ) ?? { agentName: editingAgent.name }
+          }
+          onCancel={() => setEditingAgent(null)}
+          onSaveAgent={handleUpdateAgent}
+          onSaveAppearance={handleUpdateAppearance}
+        />
       )}
 
       {showGenerateDialog && (

@@ -56,6 +56,15 @@ export type AgentGroup = {
   agentNames: string[]
 }
 
+/** UI-only per-project desk presentation: free-drag position and custom colors. */
+export type DeskLayout = {
+  agentName: string
+  x?: number
+  y?: number
+  suitColor?: string
+  deskColor?: string
+}
+
 export type PermissionMode = 'confirm' | 'auto'
 
 /** A tool call awaiting the user's approve/deny decision (confirm-mode only). */

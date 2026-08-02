@@ -34,12 +34,25 @@ export default function ChatPanel({
 }: Props): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [listening, setListening] = useState(false)
+  const [calm, setCalm] = useState(() => localStorage.getItem(`calm:${agent.name}`) === '1')
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const speechSupported = Boolean(getSpeechRecognitionCtor())
 
   useEffect(() => {
     return () => recognitionRef.current?.stop()
   }, [])
+
+  useEffect(() => {
+    setCalm(localStorage.getItem(`calm:${agent.name}`) === '1')
+  }, [agent.name])
+
+  function toggleCalm(): void {
+    setCalm((prev) => {
+      const next = !prev
+      localStorage.setItem(`calm:${agent.name}`, next ? '1' : '0')
+      return next
+    })
+  }
 
   const submit = (): void => {
     const text = draft.trim()
@@ -106,6 +119,14 @@ export default function ChatPanel({
           <option value="confirm">Ask Me</option>
           <option value="auto">Auto Accept</option>
         </select>
+        <button
+          className={`calm-toggle ${calm ? 'calm-toggle-active' : ''}`}
+          onClick={toggleCalm}
+          title={calm ? 'Calm mode on — showing text only' : 'Calm mode off — showing everything'}
+          type="button"
+        >
+          {calm ? '🌙 Calm' : '🔔 Calm'}
+        </button>
       </div>
 
       <div className="chat-thread">
@@ -116,7 +137,7 @@ export default function ChatPanel({
           </div>
         )}
         {items.map((item) => (
-          <ChatRow key={item.id} item={item} />
+          <ChatRow key={item.id} item={item} calm={calm} />
         ))}
       </div>
 
