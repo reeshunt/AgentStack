@@ -20,6 +20,7 @@ type Props = {
   onHandoff: (targetAgentName: string, promptText: string) => void
   projectPath: string
   onClearSession: () => void
+  onInterrupt: () => void
 }
 
 export default function ChatPanel({
@@ -32,9 +33,12 @@ export default function ChatPanel({
   agents,
   onHandoff,
   projectPath,
-  onClearSession
+  onClearSession,
+  onInterrupt
 }: Props): React.JSX.Element {
   const [draft, setDraft] = useState('')
+  const [interrupting, setInterrupting] = useState(false)
+  const isBusy = status === 'thinking' || status === 'running'
   const [listening, setListening] = useState(false)
   const [showAgentInfo, setShowAgentInfo] = useState(false)
   const [focusMode, setFocusMode] = useState(
@@ -61,6 +65,18 @@ export default function ChatPanel({
   useEffect(() => {
     setFocusMode(localStorage.getItem(`calm:${agent.name}`) === '1')
   }, [agent.name])
+
+  // Drop the "stopping…" state as soon as the agent actually settles (or we
+  // switch to a different agent entirely) — `interrupt` only requests a stop,
+  // it doesn't itself confirm the turn has ended.
+  useEffect(() => {
+    if (!isBusy) setInterrupting(false)
+  }, [isBusy, agent.name])
+
+  function handleInterruptClick(): void {
+    setInterrupting(true)
+    onInterrupt()
+  }
 
   function toggleFocusMode(): void {
     setFocusMode((prev) => {
@@ -213,9 +229,21 @@ export default function ChatPanel({
           onKeyDown={onKeyDown}
           placeholder={listening ? 'Listening…' : `Message ${agent.name}...`}
         />
-        <button className="chat-send" onClick={submit} disabled={!draft.trim()}>
-          →
-        </button>
+        {isBusy ? (
+          <button
+            className="chat-stop"
+            onClick={handleInterruptClick}
+            disabled={interrupting}
+            title="Stop — interrupt the agent's current turn"
+            type="button"
+          >
+            {interrupting ? 'Stopping…' : '⏹ Stop'}
+          </button>
+        ) : (
+          <button className="chat-send" onClick={submit} disabled={!draft.trim()}>
+            →
+          </button>
+        )}
       </div>
       </div>
 
