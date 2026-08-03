@@ -1,5 +1,5 @@
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { BrowserWindow } from 'electron'
+import { appEvents } from './events/AppEventBus'
 import { getPermissionMode } from './settings'
 
 type Pending = { resolve: (result: PermissionResult) => void }
@@ -13,7 +13,6 @@ const pending = new Map<string, Pending>()
  * renderer's later response back to this specific pending call.
  */
 export function requestPermission(
-  win: BrowserWindow,
   sessionKeyStr: string,
   projectId: string,
   toolName: string,
@@ -42,14 +41,12 @@ export function requestPermission(
       { once: true }
     )
 
-    if (!win.isDestroyed()) {
-      win.webContents.send('session:permission_request', {
-        key: sessionKeyStr,
-        toolUseID,
-        toolName,
-        toolInput
-      })
-    }
+    appEvents.emit('session:permission_request', {
+      key: sessionKeyStr,
+      toolUseID,
+      toolName,
+      toolInput
+    })
 
     // Wrap resolve so answering also clears the pending entry.
     pending.set(toolUseID, {

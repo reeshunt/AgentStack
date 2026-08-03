@@ -4,27 +4,42 @@ import { addProject, listProjects, removeProject } from './projectRegistry'
 import { createAgent, listAgents, readAgentPrompt, updateAgent } from './agents'
 import { listDeskLayout, setDeskAppearance, setDeskPosition } from './deskLayout'
 import { checkClaudeCli } from './claudeCli'
-import {
-  ensureSession,
-  getSession,
-  interruptSession,
-  loadHistory,
-  resetSession,
-  sendPrompt
-} from './sessions'
+import { sessionService } from './services/SessionService'
+import { orchestrationService } from './services/OrchestrationService'
+import { appEvents } from './events/AppEventBus'
+import { FLOOR_MANAGER_DISALLOWED_TOOLS, PromptFactory } from './prompts/PromptFactory'
 import { answerPermission } from './permissions'
 import { getPermissionMode, setPermissionMode } from './settings'
 import { deleteMockup, listMockups, saveMockup } from './mockups'
 import { ensureTerminal, killAllTerminals, killTerminal, resizeTerminal, writeTerminal } from './terminal'
 import { listDirectory, readFileContents, renamePath, writeFileContents } from './fileExplorer'
-import {
-  buildDelegationBriefing,
-  buildDelegationMcpServer,
-  FLOOR_MANAGER_DISALLOWED_TOOLS
-} from './orchestration'
 import type { MockupScreen, NewAgentInput, PermissionMode } from '../shared/types'
 
+// Constructed for its side effect: registers the 'delegation' MCP tool set into the shared
+// ToolRegistry so SessionService can wire it into the Floor Manager's session by name.
+void orchestrationService
+
 let mainWindow: BrowserWindow | null = null
+
+/** The single place that bridges the process-wide `AppEventBus` onto the live window.
+ *  Every domain service (sessions, orchestration, quota, permissions) only knows about
+ *  the bus — this is the only spot that knows about `webContents.send`. */
+function wireEventBusToWindow(win: BrowserWindow): Array<() => void> {
+  return [
+    appEvents.on('session:event', (event) => {
+      if (!win.isDestroyed()) win.webContents.send('session:event', event)
+    }),
+    appEvents.on('orchestration:event', (event) => {
+      if (!win.isDestroyed()) win.webContents.send('orchestration:event', event)
+    }),
+    appEvents.on('quota:update', (info) => {
+      if (!win.isDestroyed()) win.webContents.send('quota:update', info)
+    }),
+    appEvents.on('session:permission_request', (request) => {
+      if (!win.isDestroyed()) win.webContents.send('session:permission_request', request)
+    })
+  ]
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -43,6 +58,9 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  const unsubscribers = wireEventBusToWindow(mainWindow)
+  mainWindow.on('closed', () => unsubscribers.forEach((unsubscribe) => unsubscribe()))
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -102,29 +120,24 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'session:ensure',
     async (_e, args: { projectId: string; projectPath: string; agentName: string }) => {
-      if (!mainWindow) throw new Error('No window')
-
       // Only the Floor Manager's session gets the delegate_task tool + delegation
       // briefing — everyone else starts exactly as before.
       const roster = await listAgents(args.projectPath)
       const agent = roster.find((a) => a.name === args.agentName)
-      const extraMcpServers = agent?.isFloorManager
-        ? buildDelegationMcpServer(args.projectId, args.projectPath, args.agentName, mainWindow)
-        : undefined
-      const extraSystemPromptSuffix = agent?.isFloorManager
-        ? buildDelegationBriefing(roster.filter((a) => a.name !== args.agentName))
+      const toolSetIds = agent?.isFloorManager ? ['delegation'] : undefined
+      const delegationBriefing = agent?.isFloorManager
+        ? PromptFactory.buildDelegationBriefing(roster.filter((a) => a.name !== args.agentName))
         : undefined
       const extraDisallowedTools = agent?.isFloorManager ? FLOOR_MANAGER_DISALLOWED_TOOLS : undefined
 
-      const state = await ensureSession(
-        args.projectId,
-        args.projectPath,
-        args.agentName,
-        mainWindow,
-        extraMcpServers,
-        extraSystemPromptSuffix,
+      const state = await sessionService.ensureSession({
+        projectId: args.projectId,
+        projectPath: args.projectPath,
+        agentName: args.agentName,
+        toolSetIds,
+        delegationBriefing,
         extraDisallowedTools
-      )
+      })
       return { key: state.key, status: state.status, resumed: state.resumed, sessionId: state.sessionId }
     }
   )
@@ -132,26 +145,26 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'session:history',
     (_e, args: { projectPath: string; sessionId: string }) =>
-      loadHistory(args.projectPath, args.sessionId)
+      sessionService.loadHistory(args.projectPath, args.sessionId)
   )
 
   ipcMain.handle(
     'session:prompt',
     (_e, args: { projectId: string; agentName: string; text: string }) => {
-      const state = getSession(args.projectId, args.agentName)
+      const state = sessionService.getSession(args.projectId, args.agentName)
       if (!state) throw new Error('Session not started')
-      sendPrompt(state, args.text)
+      sessionService.sendPrompt(state, args.text)
     }
   )
 
   ipcMain.handle('session:interrupt', async (_e, args: { projectId: string; agentName: string }) => {
-    const state = getSession(args.projectId, args.agentName)
+    const state = sessionService.getSession(args.projectId, args.agentName)
     if (!state) return
-    await interruptSession(state)
+    await sessionService.interruptSession(state)
   })
 
   ipcMain.handle('session:clear', (_e, args: { projectId: string; agentName: string }) =>
-    resetSession(args.projectId, args.agentName)
+    sessionService.resetSession(args.projectId, args.agentName)
   )
 
   ipcMain.handle('settings:getPermissionMode', (_e, projectId: string) =>
