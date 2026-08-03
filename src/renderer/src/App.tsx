@@ -17,6 +17,7 @@ import EditAgentDialog from './components/EditAgentDialog'
 import GenerateAgentsDialog from './components/GenerateAgentsDialog'
 import NameGroupDialog from './components/NameGroupDialog'
 import QuotaBadge from './components/QuotaBadge'
+import { AGENT_TEMPLATES } from '../../shared/agentTemplates'
 import { toChatItems, userChatItem, type ChatItem } from './chatItems'
 
 let itemSeq = 0
@@ -40,9 +41,6 @@ export default function App(): React.JSX.Element {
   const [editingAgent, setEditingAgent] = useState<AgentInfo | null>(null)
   const [deskLayoutByProject, setDeskLayoutByProject] = useState<Record<string, DeskLayout[]>>({})
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
-  const [generateProjectId, setGenerateProjectId] = useState<string | null>(null)
-  const [generateItems, setGenerateItems] = useState<ChatItem[]>([])
-  const [generating, setGenerating] = useState(false)
   const [groupsByProject, setGroupsByProject] = useState<Record<string, AgentGroup[]>>({})
   const [picking, setPicking] = useState(false)
   const [pickedAgents, setPickedAgents] = useState<string[]>([])
@@ -117,27 +115,6 @@ export default function App(): React.JSX.Element {
       setAgentsByProject((prev) => ({ ...prev, [projectId]: agents }))
     })
   }
-
-  useEffect(() => {
-    if (!generateProjectId) return
-    const key = `generate::${generateProjectId}`
-
-    const offEvent = window.agentstack.onGenerateEvent((event) => {
-      if (event.key !== key) return
-      const newItems = toChatItems(event)
-      if (newItems.length > 0) setGenerateItems((prev) => [...prev, ...newItems])
-    })
-    const offDone = window.agentstack.onGenerateDone((payload) => {
-      if (payload.key !== key) return
-      setGenerating(false)
-      const project = projects.find((p) => p.id === generateProjectId)
-      if (project) refreshAgents(project.id, project.path)
-    })
-    return () => {
-      offEvent()
-      offDone()
-    }
-  }, [generateProjectId, projects])
 
   useEffect(() => {
     if (!selectedProject) return
@@ -294,6 +271,26 @@ export default function App(): React.JSX.Element {
     await window.agentstack.sendPrompt(selectedProject.id, selectedAgentName, text)
   }
 
+  async function handleClearSession(): Promise<void> {
+    if (!selectedProject || !selectedAgentName || !activeKey) return
+    await window.agentstack.clearSession(selectedProject.id, selectedAgentName)
+    const key = activeKey
+    setChatLogs((prev) => ({ ...prev, [key]: [] }))
+    setStatuses((prev) => ({ ...prev, [key]: 'idle' }))
+    setHydratedKeys((prev) => ({ ...prev, [key]: false }))
+  }
+
+  async function handleHandoff(targetAgentName: string, promptText: string): Promise<void> {
+    if (!selectedProject) return
+    await handleSelectAgent(targetAgentName)
+    const key = sessionKey(selectedProject.id, targetAgentName)
+    setChatLogs((prev) => ({
+      ...prev,
+      [key]: [...(prev[key] ?? []), userChatItem(promptText)]
+    }))
+    await window.agentstack.sendPrompt(selectedProject.id, targetAgentName, promptText)
+  }
+
   async function handleCreateAgent(input: NewAgentInput): Promise<void> {
     if (!selectedProject) return
     await window.agentstack.createAgent(selectedProject.path, input)
@@ -303,11 +300,26 @@ export default function App(): React.JSX.Element {
 
   function handleGenerateAgents(): void {
     if (!selectedProject) return
-    setGenerateProjectId(selectedProject.id)
-    setGenerateItems([])
-    setGenerating(true)
     setShowGenerateDialog(true)
-    window.agentstack.generateAgents(selectedProject.id, selectedProject.path)
+  }
+
+  async function handleCreateFromTemplates(templateIds: string[]): Promise<void> {
+    if (!selectedProject) return
+    const templates = AGENT_TEMPLATES.filter((t) => templateIds.includes(t.id))
+    for (const t of templates) {
+      await window.agentstack.createAgent(selectedProject.path, {
+        name: t.name,
+        description: t.description,
+        model: t.model,
+        color: t.color,
+        icon: t.icon,
+        department: t.department,
+        previewUI: t.previewUI,
+        systemPrompt: t.systemPrompt
+      })
+    }
+    refreshAgents(selectedProject.id, selectedProject.path)
+    setShowGenerateDialog(false)
   }
 
   function handleTogglePicking(): void {
@@ -345,9 +357,6 @@ export default function App(): React.JSX.Element {
           <span className="logo-mark">◆</span>
           <span>AgentStack</span>
         </div>
-        <div className="title-bar-center">
-          <input className="search-input" type="text" placeholder="Search projects, agents..." />
-        </div>
         <div className="title-bar-right">
           <QuotaBadge quota={quota} />
           {cliStatus && (
@@ -381,7 +390,6 @@ export default function App(): React.JSX.Element {
           layout={selectedProject ? (deskLayoutByProject[selectedProject.id] ?? []) : []}
           onMoveDesk={handleMoveDesk}
           onGenerateAgents={handleGenerateAgents}
-          generating={generating && generateProjectId === selectedProject?.id}
           groups={groups}
           picking={picking}
           pickedAgents={pickedAgents}
@@ -399,6 +407,10 @@ export default function App(): React.JSX.Element {
             onSend={handleSend}
             permissionMode={permissionModeByProject[selectedProject.id] ?? 'confirm'}
             onChangePermissionMode={handleSetPermissionMode}
+            agents={agents}
+            onHandoff={handleHandoff}
+            projectPath={selectedProject.path}
+            onClearSession={handleClearSession}
           />
         ) : (
           <div className="agent-chat-panel">
@@ -429,12 +441,12 @@ export default function App(): React.JSX.Element {
         />
       )}
 
-      {showGenerateDialog && (
+      {showGenerateDialog && selectedProject && (
         <GenerateAgentsDialog
-          projectName={projects.find((p) => p.id === generateProjectId)?.name ?? ''}
-          items={generateItems}
-          running={generating}
+          projectName={selectedProject.name}
+          existingNames={agents.map((a) => a.name)}
           onClose={() => setShowGenerateDialog(false)}
+          onCreate={handleCreateFromTemplates}
         />
       )}
 

@@ -17,6 +17,7 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
   const [department, setDepartment] = useState('')
   const [icon, setIcon] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [previewUI, setPreviewUI] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const canCreate = name.trim() && description.trim() && systemPrompt.trim() && !busy
@@ -32,6 +33,7 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
         color,
         icon: icon.trim() || undefined,
         department: department.trim() || undefined,
+        previewUI,
         systemPrompt: systemPrompt.trim()
       })
     } finally {
@@ -97,6 +99,23 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
             />
           </label>
         </div>
+
+        <label className="field-block field-toggle-row">
+          <span className="field-toggle-label">
+            <input
+              type="checkbox"
+              checked={previewUI}
+              onChange={(e) => setPreviewUI(e.target.checked)}
+            />
+            Preview responses as HTML/React
+          </span>
+          <span
+            className="focus-mode-info"
+            title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
+          >
+            ⓘ
+          </span>
+        </label>
 
         <label className="field-block">
           System prompt

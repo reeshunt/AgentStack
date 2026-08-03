@@ -16,7 +16,6 @@ type Props = {
   onAddAgent: () => void
   onEditAgent: (agent: AgentInfo) => void
   onGenerateAgents: () => void
-  generating: boolean
   groups: AgentGroup[]
   picking: boolean
   pickedAgents: string[]
@@ -54,7 +53,6 @@ export default function DeskGrid(props: Props): React.JSX.Element {
     onAddAgent,
     onEditAgent,
     onGenerateAgents,
-    generating,
     groups,
     picking,
     pickedAgents,
@@ -211,12 +209,8 @@ export default function DeskGrid(props: Props): React.JSX.Element {
               <button className="add-agent-button" onClick={onAddAgent}>
                 + Add Agent
               </button>
-              <button
-                className="add-agent-button generate-button"
-                onClick={onGenerateAgents}
-                disabled={generating}
-              >
-                {generating ? '🪄 Generating…' : '🪄 Generate Agents'}
+              <button className="add-agent-button generate-button" onClick={onGenerateAgents}>
+                🪄 Generate Agents
               </button>
               <button className="add-agent-button" onClick={onTogglePicking}>
                 {picking ? 'Cancel' : '👥 Group Agents'}

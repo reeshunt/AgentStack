@@ -4,6 +4,7 @@ import type { KeyboardEvent } from 'react'
 import type { AgentInfo, PermissionMode } from '../../../shared/types'
 import type { ChatItem } from '../chatItems'
 import ChatRow from './ChatRow'
+import PreviewPanel from './PreviewPanel'
 import { getSpeechRecognitionCtor, type SpeechRecognitionInstance } from '../speechRecognition'
 
 const STATUS_TEXT: Record<string, string> = {
@@ -22,6 +23,10 @@ type Props = {
   onSend: (text: string) => void
   permissionMode: PermissionMode
   onChangePermissionMode: (mode: PermissionMode) => void
+  agents: AgentInfo[]
+  onHandoff: (targetAgentName: string, promptText: string) => void
+  projectPath: string
+  onClearSession: () => void
 }
 
 export default function ChatPanel({
@@ -30,11 +35,17 @@ export default function ChatPanel({
   status,
   onSend,
   permissionMode,
-  onChangePermissionMode
+  onChangePermissionMode,
+  agents,
+  onHandoff,
+  projectPath,
+  onClearSession
 }: Props): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [listening, setListening] = useState(false)
-  const [calm, setCalm] = useState(() => localStorage.getItem(`calm:${agent.name}`) === '1')
+  const [focusMode, setFocusMode] = useState(
+    () => localStorage.getItem(`calm:${agent.name}`) === '1'
+  )
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const speechSupported = Boolean(getSpeechRecognitionCtor())
 
@@ -43,11 +54,11 @@ export default function ChatPanel({
   }, [])
 
   useEffect(() => {
-    setCalm(localStorage.getItem(`calm:${agent.name}`) === '1')
+    setFocusMode(localStorage.getItem(`calm:${agent.name}`) === '1')
   }, [agent.name])
 
-  function toggleCalm(): void {
-    setCalm((prev) => {
+  function toggleFocusMode(): void {
+    setFocusMode((prev) => {
       const next = !prev
       localStorage.setItem(`calm:${agent.name}`, next ? '1' : '0')
       return next
@@ -94,7 +105,8 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="agent-chat-panel">
+    <div className={`agent-chat-panel ${agent.previewUI ? 'has-preview' : ''}`}>
+      <div className="agent-chat-column">
       <div className="chat-header">
         <div className="character" style={{ animation: 'none', marginTop: 0 }}>
           <div className="character-head" />
@@ -106,6 +118,18 @@ export default function ChatPanel({
             {agent.description ?? 'Subagent'} · {agent.model ?? 'default model'}
           </div>
         </div>
+        <button
+          className="chat-clear-session"
+          title="Clear session — forgets this conversation and resumes fresh from the agent's original role, with no memory of anything said before"
+          onClick={() => {
+            if (confirm(`Clear this conversation with ${agent.name}? This can't be undone.`)) {
+              onClearSession()
+            }
+          }}
+          type="button"
+        >
+          ↺ Clear session
+        </button>
       </div>
 
       <div className="chat-status-row">
@@ -120,13 +144,23 @@ export default function ChatPanel({
           <option value="auto">Auto Accept</option>
         </select>
         <button
-          className={`calm-toggle ${calm ? 'calm-toggle-active' : ''}`}
-          onClick={toggleCalm}
-          title={calm ? 'Calm mode on — showing text only' : 'Calm mode off — showing everything'}
+          className={`calm-toggle ${focusMode ? 'calm-toggle-active' : ''}`}
+          onClick={toggleFocusMode}
+          title={
+            focusMode
+              ? 'Focus mode on — showing text only'
+              : 'Focus mode off — showing everything'
+          }
           type="button"
         >
-          {calm ? '🌙 Calm' : '🔔 Calm'}
+          {focusMode ? '🌙 Focus mode' : '🔔 Focus mode'}
         </button>
+        <span
+          className="focus-mode-info"
+          title="Focus mode hides tool calls, file diffs, and other non-text activity so the chat only shows the conversation itself — useful when you just want to read the agent's reasoning without the noise."
+        >
+          ⓘ
+        </span>
       </div>
 
       <div className="chat-thread">
@@ -137,7 +171,7 @@ export default function ChatPanel({
           </div>
         )}
         {items.map((item) => (
-          <ChatRow key={item.id} item={item} calm={calm} />
+          <ChatRow key={item.id} item={item} calm={focusMode} />
         ))}
       </div>
 
@@ -163,6 +197,18 @@ export default function ChatPanel({
           →
         </button>
       </div>
+      </div>
+
+      {agent.previewUI && (
+        <PreviewPanel
+          items={items}
+          agents={agents}
+          currentAgentName={agent.name}
+          onHandoff={onHandoff}
+          onSend={onSend}
+          projectPath={projectPath}
+        />
+      )}
     </div>
   )
 }

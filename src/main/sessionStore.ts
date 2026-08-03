@@ -15,3 +15,9 @@ export function saveSessionId(key: string, sessionId: string): void {
      ON CONFLICT(key) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at`
   ).run(key, sessionId, Date.now())
 }
+
+/** Forgets a (project, agent) pair's saved SDK session_id, so the next prompt starts fresh
+ *  instead of resuming — used by "Clear session" in the chat UI. */
+export function clearSessionId(key: string): void {
+  db.prepare('DELETE FROM agent_sessions WHERE key = ?').run(key)
+}

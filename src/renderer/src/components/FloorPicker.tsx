@@ -41,11 +41,9 @@ export default function FloorPicker({
       <div className="floor-picker-trigger" onClick={() => setOpen((v) => !v)}>
         <div className="floor-picker-icon">{selected ? floorIcon(selectedIndex) : '🏢'}</div>
         <div className="floor-picker-text">
-          <div className="floor-picker-num">
-            {selected ? `Floor ${selectedIndex + 1}` : 'No floor selected'}
+          <div className="floor-picker-name" title={selected?.path}>
+            {selected?.name ?? 'Add a project'}
           </div>
-          <div className="floor-picker-name">{selected?.name ?? 'Add a project'}</div>
-          {selected && <div className="floor-picker-path">{selected.path}</div>}
         </div>
         <span className="floor-picker-chevron">▾</span>
       </div>

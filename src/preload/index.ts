@@ -4,7 +4,7 @@ import type {
   AgentInfo,
   ClaudeCliStatus,
   DeskLayout,
-  GenerateEvent,
+  MockupScreen,
   NewAgentInput,
   PermissionMode,
   PermissionRequest,
@@ -68,28 +68,14 @@ const api = {
   interruptSession: (projectId: string, agentName: string): Promise<void> =>
     ipcRenderer.invoke('session:interrupt', { projectId, agentName }),
 
+  clearSession: (projectId: string, agentName: string): Promise<void> =>
+    ipcRenderer.invoke('session:clear', { projectId, agentName }),
+
   onSessionEvent: (callback: (event: SessionEvent) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: SessionEvent): void =>
       callback(payload)
     ipcRenderer.on('session:event', listener)
     return () => ipcRenderer.removeListener('session:event', listener)
-  },
-
-  generateAgents: (projectId: string, projectPath: string): Promise<void> =>
-    ipcRenderer.invoke('agents:generate', { projectId, projectPath }),
-
-  onGenerateEvent: (callback: (event: GenerateEvent) => void): (() => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, payload: GenerateEvent): void =>
-      callback(payload)
-    ipcRenderer.on('generate:event', listener)
-    return () => ipcRenderer.removeListener('generate:event', listener)
-  },
-
-  onGenerateDone: (callback: (payload: { key: string }) => void): (() => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, payload: { key: string }): void =>
-      callback(payload)
-    ipcRenderer.on('generate:done', listener)
-    return () => ipcRenderer.removeListener('generate:done', listener)
   },
 
   listGroups: (projectId: string): Promise<AgentGroup[]> => ipcRenderer.invoke('groups:list', projectId),
@@ -119,7 +105,19 @@ const api = {
       callback(payload)
     ipcRenderer.on('session:permission_request', listener)
     return () => ipcRenderer.removeListener('session:permission_request', listener)
-  }
+  },
+
+  listMockups: (projectPath: string, agentName: string): Promise<MockupScreen[]> =>
+    ipcRenderer.invoke('mockups:list', { projectPath, agentName }),
+
+  saveMockup: (
+    projectPath: string,
+    agentName: string,
+    screen: { title: string; lang: MockupScreen['lang']; code: string }
+  ): Promise<MockupScreen> => ipcRenderer.invoke('mockups:save', { projectPath, agentName, screen }),
+
+  deleteMockup: (projectPath: string, agentName: string, screenId: string): Promise<void> =>
+    ipcRenderer.invoke('mockups:delete', { projectPath, agentName, screenId })
 }
 
 export type AgentStackApi = typeof api

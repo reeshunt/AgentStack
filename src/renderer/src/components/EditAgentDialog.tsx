@@ -27,6 +27,7 @@ export default function EditAgentDialog({
   const [department, setDepartment] = useState(agent.department ?? '')
   const [icon, setIcon] = useState(agent.icon ?? '')
   const [systemPrompt, setSystemPrompt] = useState('')
+  const [previewUI, setPreviewUI] = useState(agent.previewUI ?? false)
   const [suitColor, setSuitColor] = useState(layout.suitColor ?? '#6b7280')
   const [deskColor, setDeskColor] = useState(layout.deskColor ?? '#3a3d4d')
   const [loadingPrompt, setLoadingPrompt] = useState(true)
@@ -54,6 +55,7 @@ export default function EditAgentDialog({
         color,
         icon: icon.trim() || undefined,
         department: department.trim() || undefined,
+        previewUI,
         systemPrompt: systemPrompt.trim()
       })
       await onSaveAppearance(agent.name, suitColor, deskColor)
@@ -129,6 +131,23 @@ export default function EditAgentDialog({
             />
           </label>
         </div>
+
+        <label className="field-block field-toggle-row">
+          <span className="field-toggle-label">
+            <input
+              type="checkbox"
+              checked={previewUI}
+              onChange={(e) => setPreviewUI(e.target.checked)}
+            />
+            Preview responses as HTML/React
+          </span>
+          <span
+            className="focus-mode-info"
+            title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
+          >
+            ⓘ
+          </span>
+        </label>
 
         <label className="field-block">
           System prompt

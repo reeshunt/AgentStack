@@ -19,6 +19,9 @@ export type AgentInfo = {
   icon?: string
   /** AgentStack-only convenience field: groups desks on the floor by department */
   department?: string
+  /** AgentStack-only: when true, the chat UI shows a Preview panel that extracts
+   *  HTML/JSX/TSX code blocks from this agent's replies as clickable mockup/wireframe screens. */
+  previewUI?: boolean
   filePath: string
 }
 
@@ -29,6 +32,7 @@ export type NewAgentInput = {
   color: string
   icon?: string
   department?: string
+  previewUI?: boolean
   systemPrompt: string
 }
 
@@ -39,12 +43,6 @@ export type StreamedMessage = SDKMessage | { type: 'local_error'; error: string 
 export type SessionEvent = {
   key: string
   status: SessionStatus
-  message: StreamedMessage
-}
-
-/** Progress event for the one-off "Generate Agents" project-analysis run. */
-export type GenerateEvent = {
-  key: string
   message: StreamedMessage
 }
 
@@ -73,6 +71,16 @@ export type PermissionRequest = {
   toolUseID: string
   toolName: string
   toolInput: unknown
+}
+
+/** One mockup/wireframe screen extracted from an agent's reply, persisted to disk
+ *  under the project's .claude/mockups/<agent>/ directory so it survives reloads
+ *  and is available from any clone of the repo. */
+export type MockupScreen = {
+  id: string
+  title: string
+  lang: 'html' | 'jsx' | 'tsx' | 'react'
+  code: string
 }
 
 export type ClaudeCliStatus = {

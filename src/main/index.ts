@@ -4,12 +4,19 @@ import { addProject, listProjects, removeProject } from './projectRegistry'
 import { createAgent, listAgents, readAgentPrompt, updateAgent } from './agents'
 import { listDeskLayout, setDeskAppearance, setDeskPosition } from './deskLayout'
 import { checkClaudeCli } from './claudeCli'
-import { ensureSession, getSession, interruptSession, loadHistory, sendPrompt } from './sessions'
-import { generateAgents } from './agentGenerator'
+import {
+  ensureSession,
+  getSession,
+  interruptSession,
+  loadHistory,
+  resetSession,
+  sendPrompt
+} from './sessions'
 import { createGroup, deleteGroup, listGroups } from './groups'
 import { answerPermission } from './permissions'
 import { getPermissionMode, setPermissionMode } from './settings'
-import type { NewAgentInput, PermissionMode } from '../shared/types'
+import { deleteMockup, listMockups, saveMockup } from './mockups'
+import type { MockupScreen, NewAgentInput, PermissionMode } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -116,10 +123,9 @@ function registerIpcHandlers(): void {
     await interruptSession(state)
   })
 
-  ipcMain.handle('agents:generate', (_e, args: { projectId: string; projectPath: string }) => {
-    if (!mainWindow) throw new Error('No window')
-    generateAgents(args.projectId, args.projectPath, mainWindow)
-  })
+  ipcMain.handle('session:clear', (_e, args: { projectId: string; agentName: string }) =>
+    resetSession(args.projectId, args.agentName)
+  )
 
   ipcMain.handle('groups:list', (_e, projectId: string) => listGroups(projectId))
 
@@ -145,6 +151,30 @@ function registerIpcHandlers(): void {
     'session:permission_response',
     (_e, args: { toolUseID: string; approved: boolean; reason?: string }) =>
       answerPermission(args.toolUseID, args.approved, args.reason)
+  )
+
+  ipcMain.handle(
+    'mockups:list',
+    (_e, args: { projectPath: string; agentName: string }) =>
+      listMockups(args.projectPath, args.agentName)
+  )
+
+  ipcMain.handle(
+    'mockups:save',
+    (
+      _e,
+      args: {
+        projectPath: string
+        agentName: string
+        screen: { title: string; lang: MockupScreen['lang']; code: string }
+      }
+    ) => saveMockup(args.projectPath, args.agentName, args.screen)
+  )
+
+  ipcMain.handle(
+    'mockups:delete',
+    (_e, args: { projectPath: string; agentName: string; screenId: string }) =>
+      deleteMockup(args.projectPath, args.agentName, args.screenId)
   )
 }
 

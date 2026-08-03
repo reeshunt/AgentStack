@@ -44,6 +44,7 @@ export async function listAgents(projectPath: string): Promise<AgentInfo[]> {
         // AgentStack-only, additive field for grouping desks on the floor —
         // ignored by Claude Code itself, same convention as `icon`.
         department: typeof data.department === 'string' ? data.department : undefined,
+        previewUI: data.previewUI === true,
         filePath
       })
     } catch {
@@ -111,6 +112,7 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
   ]
   if (input.icon) frontmatterLines.push(`icon: ${yamlString(input.icon)}`)
   if (input.department) frontmatterLines.push(`department: ${yamlString(input.department)}`)
+  if (input.previewUI) frontmatterLines.push('previewUI: true')
   frontmatterLines.push('---', '')
 
   const file = frontmatterLines.join('\n') + input.systemPrompt.trim() + '\n'
@@ -123,6 +125,7 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
     color: input.color,
     icon: input.icon ?? FALLBACK_ICONS[input.color] ?? input.name[0]?.toUpperCase(),
     department: input.department,
+    previewUI: input.previewUI ?? false,
     filePath
   }
 }
@@ -140,6 +143,7 @@ export async function updateAgent(
   ]
   if (input.icon) frontmatterLines.push(`icon: ${yamlString(input.icon)}`)
   if (input.department) frontmatterLines.push(`department: ${yamlString(input.department)}`)
+  if (input.previewUI) frontmatterLines.push('previewUI: true')
   frontmatterLines.push('---', '')
 
   const file = frontmatterLines.join('\n') + input.systemPrompt.trim() + '\n'
@@ -152,6 +156,7 @@ export async function updateAgent(
     color: input.color,
     icon: input.icon ?? FALLBACK_ICONS[input.color] ?? input.name[0]?.toUpperCase(),
     department: input.department,
+    previewUI: input.previewUI ?? false,
     filePath
   }
 }
