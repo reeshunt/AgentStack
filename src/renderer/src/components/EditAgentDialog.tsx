@@ -28,6 +28,7 @@ export default function EditAgentDialog({
   const [icon, setIcon] = useState(agent.icon ?? '')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [previewUI, setPreviewUI] = useState(agent.previewUI ?? false)
+  const [isFloorManager, setIsFloorManager] = useState(agent.isFloorManager ?? false)
   const [suitColor, setSuitColor] = useState(layout.suitColor ?? '#6b7280')
   const [deskColor, setDeskColor] = useState(layout.deskColor ?? '#3a3d4d')
   const [loadingPrompt, setLoadingPrompt] = useState(true)
@@ -56,6 +57,7 @@ export default function EditAgentDialog({
         icon: icon.trim() || undefined,
         department: department.trim() || undefined,
         previewUI,
+        isFloorManager,
         systemPrompt: systemPrompt.trim()
       })
       await onSaveAppearance(agent.name, suitColor, deskColor)
@@ -67,97 +69,121 @@ export default function EditAgentDialog({
   return (
     <div className="dialog-backdrop active" onClick={onCancel}>
       <div className="dialog dialog-wide" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-title">✏️ Edit {agent.name}</div>
-        <div className="dialog-body">
-          Updates <code>{agent.filePath}</code> and this agent's look on the floor.
+        <div className="dialog-header">
+          <div className="dialog-title">✏️ Edit {agent.name}</div>
+          <button className="dialog-close" onClick={onCancel} disabled={busy}>
+            ×
+          </button>
         </div>
+        <div className="dialog-content">
+          <div className="dialog-body">
+            Updates <code>{agent.filePath}</code> and this agent's look on the floor.
+          </div>
 
-        <div className="field-grid">
-          <label>
-            Icon (emoji)
-            <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="📱" />
-          </label>
-          <label>
-            Model
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+          <div className="field-grid">
+            <label>
+              Icon (emoji)
+              <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="📱" />
+            </label>
+            <label>
+              Model
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-        <label className="field-block">
-          Description
-          <input value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
-
-        <div className="field-grid">
-          <label>
-            Frontmatter color
-            <select value={color} onChange={(e) => setColor(e.target.value)}>
-              {COLOR_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+          <label className="field-block">
+            Description
+            <input value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
-          <label>
-            Department (optional)
-            <input value={department} onChange={(e) => setDepartment(e.target.value)} />
-          </label>
-        </div>
 
-        <div className="field-grid">
-          <label>
-            Suit color (when idle)
-            <input
-              type="color"
-              value={suitColor}
-              onChange={(e) => setSuitColor(e.target.value)}
-              className="color-swatch-input"
+          <div className="field-grid">
+            <label>
+              Frontmatter color
+              <select value={color} onChange={(e) => setColor(e.target.value)}>
+                {COLOR_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Department (optional)
+              <input value={department} onChange={(e) => setDepartment(e.target.value)} />
+            </label>
+          </div>
+
+          <div className="field-grid">
+            <label>
+              Suit color (desk icon tint)
+              <input
+                type="color"
+                value={suitColor}
+                onChange={(e) => setSuitColor(e.target.value)}
+                className="color-swatch-input"
+              />
+            </label>
+            <label>
+              Desk card color
+              <input
+                type="color"
+                value={deskColor}
+                onChange={(e) => setDeskColor(e.target.value)}
+                className="color-swatch-input"
+              />
+            </label>
+          </div>
+
+          <label className="field-block field-toggle-row">
+            <span className="field-toggle-label">
+              <input
+                type="checkbox"
+                checked={previewUI}
+                onChange={(e) => setPreviewUI(e.target.checked)}
+              />
+              Preview responses as HTML/React
+            </span>
+            <span
+              className="focus-mode-info"
+              title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
+            >
+              ⓘ
+            </span>
+          </label>
+
+          <label className="field-block field-toggle-row">
+            <span className="field-toggle-label">
+              <input
+                type="checkbox"
+                checked={isFloorManager}
+                onChange={(e) => setIsFloorManager(e.target.checked)}
+              />
+              Make this the Floor Manager
+            </span>
+            <span
+              className="focus-mode-info"
+              title="Only one agent per project can be the Floor Manager. It always renders first on the floor and can delegate tasks to other agents on your behalf — marking this one un-marks any other agent currently holding the role."
+            >
+              ⓘ
+            </span>
+          </label>
+
+          <label className="field-block">
+            System prompt
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={8}
+              disabled={loadingPrompt}
             />
           </label>
-          <label>
-            Desk / table color
-            <input
-              type="color"
-              value={deskColor}
-              onChange={(e) => setDeskColor(e.target.value)}
-              className="color-swatch-input"
-            />
-          </label>
         </div>
-
-        <label className="field-block field-toggle-row">
-          <span className="field-toggle-label">
-            <input
-              type="checkbox"
-              checked={previewUI}
-              onChange={(e) => setPreviewUI(e.target.checked)}
-            />
-            Preview responses as HTML/React
-          </span>
-          <span
-            className="focus-mode-info"
-            title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
-          >
-            ⓘ
-          </span>
-        </label>
-
-        <label className="field-block">
-          System prompt
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={8}
-            disabled={loadingPrompt}
-          />
-        </label>
 
         <div className="dialog-actions">
           <button className="dialog-button" onClick={onCancel} disabled={busy}>

@@ -22,6 +22,10 @@ export type AgentInfo = {
   /** AgentStack-only: when true, the chat UI shows a Preview panel that extracts
    *  HTML/JSX/TSX code blocks from this agent's replies as clickable mockup/wireframe screens. */
   previewUI?: boolean
+  /** AgentStack-only: marks this agent as the project's orchestrator. At most one agent per
+   *  project may hold this flag — it always renders first on the floor and is the only agent
+   *  whose session is wired with the `delegate_task` tool for handing work to other agents. */
+  isFloorManager?: boolean
   filePath: string
 }
 
@@ -33,6 +37,7 @@ export type NewAgentInput = {
   icon?: string
   department?: string
   previewUI?: boolean
+  isFloorManager?: boolean
   systemPrompt: string
 }
 
@@ -46,21 +51,14 @@ export type SessionEvent = {
   message: StreamedMessage
 }
 
-/** A user-created group of agents on one project's floor (manual, via multi-select). */
-export type AgentGroup = {
-  id: string
-  projectId: string
-  name: string
-  agentNames: string[]
-}
-
-/** UI-only per-project desk presentation: free-drag position and custom colors. */
+/** UI-only per-project desk presentation: custom desk-card colors and free-form position
+ *  on the floor canvas. `x`/`y` are absent until the user has dragged the card at least once. */
 export type DeskLayout = {
   agentName: string
-  x?: number
-  y?: number
   suitColor?: string
   deskColor?: string
+  x?: number
+  y?: number
 }
 
 export type PermissionMode = 'confirm' | 'auto'
@@ -91,4 +89,33 @@ export type ClaudeCliStatus = {
 
 export function sessionKey(projectId: string, agentName: string): string {
   return `${projectId}::${agentName}`
+}
+
+/** One entry in a project directory listing, shown in the File Viewer's tree. */
+export type FileEntry = {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+}
+
+/** A delegation the Floor Manager has handed to a worker agent via `delegate_task`.
+ *  Drives the animated dashed-line overlay on the floor and (once 'done'/'error') the
+ *  stats card appended to the Floor Manager's own chat log. */
+export type OrchestrationEvent = {
+  id: string
+  projectId: string
+  from: string
+  to: string
+  status: 'active' | 'done' | 'error'
+  /** Present only when status is 'active' — the task text handed to the worker agent,
+   *  so its chat thread can show what it was asked to do. */
+  task?: string
+  /** Present only once status is 'done' or 'error'. */
+  stats?: {
+    resultText: string
+    contextPct: number
+    costUsd: number
+    numTurns: number
+  }
 }

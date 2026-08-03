@@ -1,5 +1,5 @@
 import { getSessionMessages, query } from '@anthropic-ai/claude-agent-sdk'
-import type { Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { McpServerConfig, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { BrowserWindow } from 'electron'
 import { PushQueue } from './pushQueue'
 import { readAgentPrompt } from './agents'
@@ -23,6 +23,48 @@ type SessionState = {
 
 const sessions = new Map<string, SessionState>()
 const pending = new Map<string, Promise<SessionState>>()
+
+/** Result of one delegated turn, resolved from the target session's own `result` message
+ *  so the Floor Manager's `delegate_task` tool can await a worker agent actually finishing. */
+export type DelegationResult = {
+  ok: boolean
+  resultText: string
+  contextPct: number
+  costUsd: number
+  numTurns: number
+}
+
+type DelegationWaiter = { resolve: (result: DelegationResult) => void }
+
+// FIFO per session key — if a worker agent is delegated to more than once back-to-back,
+// each `awaitAgentResult` call is resolved by the next `result` message in call order.
+const delegationWaiters = new Map<string, DelegationWaiter[]>()
+
+/** Registers a waiter for the next `result` message on this session key. Registration is
+ *  synchronous (the executor runs immediately), so callers can safely call this before
+ *  `sendPrompt` without racing the SDK's own processing of that prompt. */
+export function awaitAgentResult(key: string): Promise<DelegationResult> {
+  return new Promise((resolve) => {
+    const waiters = delegationWaiters.get(key) ?? []
+    waiters.push({ resolve })
+    delegationWaiters.set(key, waiters)
+  })
+}
+
+/** True when an error message indicates the resumed session's transcript no longer exists
+ *  on disk (e.g. deleted, moved project, or corrupted history) — the resume id is dead and
+ *  must be discarded rather than retried forever. */
+function isStaleResumeError(text: string): boolean {
+  return /no conversation found with session id/i.test(text)
+}
+
+/** Drops a session that failed to resume: clears the saved session id and removes the
+ *  live (now-dead) session state so the next `ensureSession` call starts a brand-new
+ *  conversation instead of retrying the same broken resume id forever. */
+function discardStaleSession(key: string): void {
+  clearSessionId(key)
+  sessions.delete(key)
+}
 
 function deriveStatus(message: SDKMessage, previous: SessionStatus): SessionStatus {
   switch (message.type) {
@@ -67,7 +109,10 @@ async function createSession(
   projectId: string,
   projectPath: string,
   agentName: string,
-  win: BrowserWindow
+  win: BrowserWindow,
+  extraMcpServers?: Record<string, McpServerConfig>,
+  extraSystemPromptSuffix?: string,
+  extraDisallowedTools?: string[]
 ): Promise<SessionState> {
   const key = sessionKey(projectId, agentName)
 
@@ -83,8 +128,13 @@ async function createSession(
     prompt: input,
     options: {
       cwd: projectPath,
-      systemPrompt: prompt ? withRoleLock(agentName, prompt.systemPrompt) : undefined,
+      systemPrompt: prompt
+        ? withRoleLock(agentName, prompt.systemPrompt) +
+          (extraSystemPromptSuffix ? `\n\n${extraSystemPromptSuffix}` : '')
+        : undefined,
       tools: prompt?.tools,
+      mcpServers: extraMcpServers,
+      disallowedTools: extraDisallowedTools,
       resume: resumeId,
       permissionMode: 'default',
       canUseTool: async (toolName, toolInput, { signal, toolUseID }) => {
@@ -118,16 +168,57 @@ async function createSession(
           saveSessionId(key, message.session_id)
         }
         forwardQuota(win, message)
+
+        if (message.type === 'result' && message.is_error) {
+          const text = message.subtype === 'success' ? message.result : message.errors.join('; ')
+          if (isStaleResumeError(text ?? '')) discardStaleSession(key)
+        }
+
+        if (message.type === 'result') {
+          const waiter = delegationWaiters.get(key)?.shift()
+          if (waiter) {
+            const primaryUsage = Object.values(message.modelUsage ?? {})[0]
+            const contextPct = primaryUsage
+              ? Math.min(
+                  100,
+                  Math.round(
+                    (100 *
+                      (primaryUsage.inputTokens +
+                        primaryUsage.cacheReadInputTokens +
+                        primaryUsage.cacheCreationInputTokens)) /
+                      primaryUsage.contextWindow
+                  )
+                )
+              : 0
+            waiter.resolve({
+              ok: !message.is_error,
+              resultText:
+                message.subtype === 'success' ? message.result : message.errors.join('; '),
+              contextPct,
+              costUsd: message.total_cost_usd,
+              numTurns: message.num_turns
+            })
+          }
+        }
+
         if (win.isDestroyed()) continue
         win.webContents.send('session:event', { key, status: state.status, message })
       }
     } catch (err) {
       state.status = 'error'
+      const errorText = err instanceof Error ? err.message : String(err)
+      const stale = isStaleResumeError(errorText)
+      if (stale) discardStaleSession(key)
       if (!win.isDestroyed()) {
         win.webContents.send('session:event', {
           key,
           status: 'error',
-          message: { type: 'local_error', error: err instanceof Error ? err.message : String(err) }
+          message: {
+            type: 'local_error',
+            error: stale
+              ? 'This conversation history was no longer available, so its session was cleared. Select the agent again to start fresh.'
+              : errorText
+          }
         })
       }
     }
@@ -136,12 +227,19 @@ async function createSession(
   return state
 }
 
-/** Creates the session if it doesn't exist yet; otherwise returns the existing one. */
+/** Creates the session if it doesn't exist yet; otherwise returns the existing one.
+ *  `extraMcpServers`/`extraSystemPromptSuffix`/`extraDisallowedTools` only take effect on first
+ *  creation — they're the Floor Manager's `delegate_task` wiring, delegation briefing, and the
+ *  hard restriction that keeps it from doing implementation work itself (see `session:ensure` in
+ *  main/index.ts) — ignored for an already-live session. */
 export async function ensureSession(
   projectId: string,
   projectPath: string,
   agentName: string,
-  win: BrowserWindow
+  win: BrowserWindow,
+  extraMcpServers?: Record<string, McpServerConfig>,
+  extraSystemPromptSuffix?: string,
+  extraDisallowedTools?: string[]
 ): Promise<SessionState> {
   const key = sessionKey(projectId, agentName)
   const existing = sessions.get(key)
@@ -150,7 +248,15 @@ export async function ensureSession(
   const inFlight = pending.get(key)
   if (inFlight) return inFlight
 
-  const creation = createSession(projectId, projectPath, agentName, win).finally(() => {
+  const creation = createSession(
+    projectId,
+    projectPath,
+    agentName,
+    win,
+    extraMcpServers,
+    extraSystemPromptSuffix,
+    extraDisallowedTools
+  ).finally(() => {
     pending.delete(key)
   })
   pending.set(key, creation)

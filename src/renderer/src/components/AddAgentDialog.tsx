@@ -18,6 +18,7 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
   const [icon, setIcon] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [previewUI, setPreviewUI] = useState(false)
+  const [isFloorManager, setIsFloorManager] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const canCreate = name.trim() && description.trim() && systemPrompt.trim() && !busy
@@ -34,6 +35,7 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
         icon: icon.trim() || undefined,
         department: department.trim() || undefined,
         previewUI,
+        isFloorManager,
         systemPrompt: systemPrompt.trim()
       })
     } finally {
@@ -44,88 +46,112 @@ export default function AddAgentDialog({ onCancel, onCreate }: Props): React.JSX
   return (
     <div className="dialog-backdrop active" onClick={onCancel}>
       <div className="dialog dialog-wide" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-title">🧑‍💻 New Agent</div>
-        <div className="dialog-body">
-          Creates a new <code>.claude/agents/&lt;name&gt;.md</code> file in this project.
+        <div className="dialog-header">
+          <div className="dialog-title">🧑‍💻 New Agent</div>
+          <button className="dialog-close" onClick={onCancel} disabled={busy}>
+            ×
+          </button>
         </div>
+        <div className="dialog-content">
+          <div className="dialog-body">
+            Creates a new <code>.claude/agents/&lt;name&gt;.md</code> file in this project.
+          </div>
 
-        <div className="field-grid">
-          <label>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="mobile-agent" />
-          </label>
-          <label>
-            Icon (emoji, optional)
-            <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="📱" />
-          </label>
-        </div>
+          <div className="field-grid">
+            <label>
+              Name
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="mobile-agent" />
+            </label>
+            <label>
+              Icon (emoji, optional)
+              <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="📱" />
+            </label>
+          </div>
 
-        <label className="field-block">
-          Description
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Use this agent for all work on the mobile app..."
-          />
-        </label>
-
-        <div className="field-grid">
-          <label>
-            Model
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Color
-            <select value={color} onChange={(e) => setColor(e.target.value)}>
-              {COLOR_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Department (optional)
+          <label className="field-block">
+            Description
             <input
-              value={department}
-              onChange={(e) => setDepartment(e.target.value)}
-              placeholder="Mobile"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Use this agent for all work on the mobile app..."
+            />
+          </label>
+
+          <div className="field-grid">
+            <label>
+              Model
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Color
+              <select value={color} onChange={(e) => setColor(e.target.value)}>
+                {COLOR_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Department (optional)
+              <input
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="Mobile"
+              />
+            </label>
+          </div>
+
+          <label className="field-block field-toggle-row">
+            <span className="field-toggle-label">
+              <input
+                type="checkbox"
+                checked={previewUI}
+                onChange={(e) => setPreviewUI(e.target.checked)}
+              />
+              Preview responses as HTML/React
+            </span>
+            <span
+              className="focus-mode-info"
+              title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
+            >
+              ⓘ
+            </span>
+          </label>
+
+          <label className="field-block field-toggle-row">
+            <span className="field-toggle-label">
+              <input
+                type="checkbox"
+                checked={isFloorManager}
+                onChange={(e) => setIsFloorManager(e.target.checked)}
+              />
+              Make this the Floor Manager
+            </span>
+            <span
+              className="focus-mode-info"
+              title="Only one agent per project can be the Floor Manager. It always renders first on the floor and can delegate tasks to other agents on your behalf — marking this one un-marks any other agent currently holding the role."
+            >
+              ⓘ
+            </span>
+          </label>
+
+          <label className="field-block">
+            System prompt
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={8}
+              placeholder="You are the mobile development agent for..."
             />
           </label>
         </div>
-
-        <label className="field-block field-toggle-row">
-          <span className="field-toggle-label">
-            <input
-              type="checkbox"
-              checked={previewUI}
-              onChange={(e) => setPreviewUI(e.target.checked)}
-            />
-            Preview responses as HTML/React
-          </span>
-          <span
-            className="focus-mode-info"
-            title="When on, this agent's chat gets a Preview panel: HTML/JSX/TSX code blocks in its replies are shown as clickable mockup and wireframe screens you can export or hand off to another agent to build."
-          >
-            ⓘ
-          </span>
-        </label>
-
-        <label className="field-block">
-          System prompt
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={8}
-            placeholder="You are the mobile development agent for..."
-          />
-        </label>
 
         <div className="dialog-actions">
           <button className="dialog-button" onClick={onCancel} disabled={busy}>

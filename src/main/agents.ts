@@ -45,6 +45,7 @@ export async function listAgents(projectPath: string): Promise<AgentInfo[]> {
         // ignored by Claude Code itself, same convention as `icon`.
         department: typeof data.department === 'string' ? data.department : undefined,
         previewUI: data.previewUI === true,
+        isFloorManager: data.isFloorManager === true,
         filePath
       })
     } catch {
@@ -75,6 +76,29 @@ export async function readAgentPrompt(
     : undefined
 
   return { systemPrompt: content.trim(), tools }
+}
+
+/** Strips a bare `isFloorManager: true` frontmatter line from one agent file, leaving
+ *  everything else (including comments/ordering) untouched. No-op if the file doesn't have it. */
+async function clearFloorManagerFlag(filePath: string): Promise<void> {
+  const raw = await readFile(filePath, 'utf-8')
+  const stripped = raw.replace(/^isFloorManager:\s*true\s*\n/m, '')
+  if (stripped !== raw) await writeFile(filePath, stripped, 'utf-8')
+}
+
+/** At most one agent per project may be the Floor Manager — when one is newly marked,
+ *  un-mark any other agent in the same project that previously held the flag. */
+async function enforceSingleFloorManager(agentsDir: string, keepFilePath: string): Promise<void> {
+  if (!existsSync(agentsDir)) return
+  const entries = await readdir(agentsDir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue
+    const filePath = join(agentsDir, entry.name)
+    if (filePath === keepFilePath) continue
+    const raw = await readFile(filePath, 'utf-8')
+    const { data } = matter(raw)
+    if (data.isFloorManager === true) await clearFloorManagerFlag(filePath)
+  }
 }
 
 function slugify(name: string): string {
@@ -113,10 +137,12 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
   if (input.icon) frontmatterLines.push(`icon: ${yamlString(input.icon)}`)
   if (input.department) frontmatterLines.push(`department: ${yamlString(input.department)}`)
   if (input.previewUI) frontmatterLines.push('previewUI: true')
+  if (input.isFloorManager) frontmatterLines.push('isFloorManager: true')
   frontmatterLines.push('---', '')
 
   const file = frontmatterLines.join('\n') + input.systemPrompt.trim() + '\n'
   await writeFile(filePath, file, 'utf-8')
+  if (input.isFloorManager) await enforceSingleFloorManager(agentsDir, filePath)
 
   return {
     name: input.name,
@@ -126,6 +152,7 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
     icon: input.icon ?? FALLBACK_ICONS[input.color] ?? input.name[0]?.toUpperCase(),
     department: input.department,
     previewUI: input.previewUI ?? false,
+    isFloorManager: input.isFloorManager ?? false,
     filePath
   }
 }
@@ -144,10 +171,12 @@ export async function updateAgent(
   if (input.icon) frontmatterLines.push(`icon: ${yamlString(input.icon)}`)
   if (input.department) frontmatterLines.push(`department: ${yamlString(input.department)}`)
   if (input.previewUI) frontmatterLines.push('previewUI: true')
+  if (input.isFloorManager) frontmatterLines.push('isFloorManager: true')
   frontmatterLines.push('---', '')
 
   const file = frontmatterLines.join('\n') + input.systemPrompt.trim() + '\n'
   await writeFile(filePath, file, 'utf-8')
+  if (input.isFloorManager) await enforceSingleFloorManager(join(filePath, '..'), filePath)
 
   return {
     name: input.name,
@@ -157,6 +186,7 @@ export async function updateAgent(
     icon: input.icon ?? FALLBACK_ICONS[input.color] ?? input.name[0]?.toUpperCase(),
     department: input.department,
     previewUI: input.previewUI ?? false,
+    isFloorManager: input.isFloorManager ?? false,
     filePath
   }
 }

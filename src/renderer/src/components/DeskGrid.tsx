@@ -1,14 +1,23 @@
-import { useRef, useState } from 'react'
-import type { AgentGroup, AgentInfo, DeskLayout, Project } from '../../../shared/types'
+import { useLayoutEffect, useRef, useState } from 'react'
+import type { AgentInfo, DeskLayout, OrchestrationEvent, Project } from '../../../shared/types'
+import { departmentColor, statusPulses, STATUS_COLORS, STATUS_LABELS, UNASSIGNED_DEPARTMENT } from '../theme'
 import FloorPicker from './FloorPicker'
+import DelegationOverlay from './DelegationOverlay'
+import floorTileImg from '../../../../resources/assets/floor.png'
+import ceoDeskImg from '../../../../resources/assets/CEO.png'
+import cubicleDeskImg from '../../../../resources/assets/cubicle.png'
 
 type Props = {
   project: Project | null
   projects: Project[]
   agents: AgentInfo[]
   statuses: Record<string, string>
+  celebratingAgents: string[]
   selectedAgent: string | null
   layout: DeskLayout[]
+  activeDelegations: OrchestrationEvent[]
+  onMoveDesk: (agentName: string, x: number, y: number) => void
+  onDeselectAgent: () => void
   onSelectProject: (id: string) => void
   onAddProject: () => void
   onRemoveProject: (id: string) => void
@@ -16,27 +25,56 @@ type Props = {
   onAddAgent: () => void
   onEditAgent: (agent: AgentInfo) => void
   onGenerateAgents: () => void
-  groups: AgentGroup[]
-  picking: boolean
-  pickedAgents: string[]
-  onTogglePicking: () => void
-  onTogglePick: (agentName: string) => void
-  onCreateGroup: () => void
-  onDeleteGroup: (groupId: string) => void
-  onMoveDesk: (agentName: string, x: number, y: number) => void
+  sidebarCollapsed: boolean
+  onToggleSidebar: () => void
+  recentAgentNames: string[]
+  deptFilter: string | null
+  onToggleDept: (department: string) => void
+  onShowAllDepartments: () => void
 }
 
-const DESK_W = 100
-const DESK_H = 130
-const DRAG_THRESHOLD = 4
+function departmentOf(agent: AgentInfo): string {
+  return agent.department?.trim() || UNASSIGNED_DEPARTMENT
+}
 
-function defaultPosition(index: number): { x: number; y: number } {
-  const cols = 6
+// Free-form floor canvas. Small rosters get a canvas sized to exactly fill the visible floor
+// area (no scrollbar) instead of a canvas padded out to a large fixed size; only once there
+// are enough desks that they'd genuinely need more room does the floor grow to this large
+// fixed size and start scrolling.
+const LARGE_CANVAS_WIDTH = 2400
+const LARGE_CANVAS_HEIGHT = 1600
+const SCROLL_AGENT_THRESHOLD = 20
+const DESK_WIDTH = 150
+const DESK_HEIGHT = 130
+// Fallback layout for a desk that's never been dragged yet — loose cascading grid so new
+// agents don't all stack exactly on top of each other at the origin.
+const DEFAULT_SPACING_X = 180
+const DEFAULT_SPACING_Y = 160
+const DEFAULT_GRID_Y = 24
+
+// Columns wrap to whatever actually fits the current canvas width instead of a fixed count,
+// and the final spot is clamped into the canvas bounds — otherwise a freshly generated agent
+// can default to a grid slot that's off the edge of a canvas sized for a small roster (no
+// scrollbar to reach it, so the desk is just invisible).
+function defaultPosition(
+  index: number,
+  canvasWidth: number,
+  canvasHeight: number
+): { x: number; y: number } {
+  const columns = Math.max(1, Math.floor((canvasWidth - 24) / DEFAULT_SPACING_X))
+  const x = 24 + (index % columns) * DEFAULT_SPACING_X
+  const y = DEFAULT_GRID_Y + Math.floor(index / columns) * DEFAULT_SPACING_Y
   return {
-    x: 20 + (index % cols) * (DESK_W + 30),
-    y: 20 + Math.floor(index / cols) * (DESK_H + 30)
+    x: clamp(x, canvasWidth - DESK_WIDTH),
+    y: clamp(y, canvasHeight - DESK_HEIGHT)
   }
 }
+
+function clamp(value: number, max: number): number {
+  return Math.min(Math.max(value, 0), max)
+}
+
+type DragState = { agentName: string; x: number; y: number; moved: boolean }
 
 export default function DeskGrid(props: Props): React.JSX.Element {
   const {
@@ -44,8 +82,12 @@ export default function DeskGrid(props: Props): React.JSX.Element {
     projects,
     agents,
     statuses,
+    celebratingAgents,
     selectedAgent,
     layout,
+    activeDelegations,
+    onMoveDesk,
+    onDeselectAgent,
     onSelectProject,
     onAddProject,
     onRemoveProject,
@@ -53,112 +95,160 @@ export default function DeskGrid(props: Props): React.JSX.Element {
     onAddAgent,
     onEditAgent,
     onGenerateAgents,
-    groups,
-    picking,
-    pickedAgents,
-    onTogglePicking,
-    onTogglePick,
-    onCreateGroup,
-    onDeleteGroup,
-    onMoveDesk
+    sidebarCollapsed,
+    onToggleSidebar,
+    recentAgentNames,
+    deptFilter,
+    onToggleDept,
+    onShowAllDepartments
   } = props
 
   const runningCount = Object.values(statuses).filter(
     (s) => s === 'running' || s === 'thinking'
   ).length
 
-  const layoutByName = new Map(layout.map((l) => [l.agentName, l]))
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const [dragPositions, setDragPositions] = useState<Record<string, { x: number; y: number }>>({})
-  const dragState = useRef<{
-    agentName: string
-    startX: number
-    startY: number
-    originX: number
-    originY: number
-    moved: boolean
-  } | null>(null)
+  const officeFloorRef = useRef<HTMLDivElement>(null)
+  const canvasScrollRef = useRef<HTMLDivElement>(null)
+  const deskRefs = useRef(new Map<string, HTMLDivElement>())
+  const [drag, setDrag] = useState<DragState | null>(null)
+  // Measured size of the visible floor area — used as the canvas size for small rosters so
+  // the floor exactly fills the viewport with no scrollbar, instead of always padding out to
+  // the large fixed canvas.
+  const [viewportSize, setViewportSize] = useState({ width: 960, height: 640 })
+  // Whether the pointer moved enough during this press to count as a drag rather than a
+  // click. Tracked in a ref (not state) so the click handler sees it synchronously — a
+  // pointerup-triggered setState hasn't necessarily re-rendered yet by the time the
+  // browser's own follow-up 'click' event fires.
+  const suppressClickRef = useRef(false)
 
-  function positionFor(agent: AgentInfo, index: number): { x: number; y: number } {
-    if (dragPositions[agent.name]) return dragPositions[agent.name]
+  useLayoutEffect(() => {
+    const el = canvasScrollRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      if (width > 0 && height > 0) setViewportSize({ width, height })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const layoutByName = new Map(layout.map((l) => [l.agentName, l]))
+  const agentByName = new Map(agents.map((a) => [a.name, a]))
+
+  const departmentNames: string[] = []
+  const byDepartment = new Map<string, AgentInfo[]>()
+  for (const agent of agents) {
+    const dept = departmentOf(agent)
+    if (!byDepartment.has(dept)) {
+      byDepartment.set(dept, [])
+      departmentNames.push(dept)
+    }
+    byDepartment.get(dept)!.push(agent)
+  }
+
+  const recentAgents = recentAgentNames
+    .map((name) => agentByName.get(name))
+    .filter((a): a is AgentInfo => Boolean(a))
+    .slice(0, 5)
+
+  const celebrating = new Set(celebratingAgents)
+
+  const visibleAgents = agents.filter((a) => !deptFilter || departmentOf(a) === deptFilter)
+
+  // Below the threshold, the canvas is exactly the measured floor area (no scrollbar); past
+  // it, the floor grows to the large fixed canvas and starts scrolling like before.
+  const needsScroll = agents.length > SCROLL_AGENT_THRESHOLD
+  const canvasWidth = needsScroll ? LARGE_CANVAS_WIDTH : Math.max(viewportSize.width, DESK_WIDTH)
+  const canvasHeight = needsScroll ? LARGE_CANVAS_HEIGHT : Math.max(viewportSize.height, DESK_HEIGHT)
+  const fmPinnedX = Math.round((canvasWidth - DESK_WIDTH) / 2)
+  const fmPinnedY = Math.round((canvasHeight - DESK_HEIGHT) / 2)
+
+  // Default-position index counts only non-FM agents (the FM doesn't occupy a grid slot —
+  // it's pinned separately — so without this, whichever agent lands at index 0 would default
+  // to the exact same spot as the pinned FM and render invisibly underneath it).
+  const defaultIndexByName = new Map<string, number>()
+  let nextDefaultIndex = 0
+  for (const agent of visibleAgents) {
+    if (agent.isFloorManager) continue
+    defaultIndexByName.set(agent.name, nextDefaultIndex)
+    nextDefaultIndex += 1
+  }
+
+  function positionFor(agent: AgentInfo): { x: number; y: number } {
+    if (agent.isFloorManager) return { x: fmPinnedX, y: fmPinnedY }
+    if (drag && drag.agentName === agent.name) return { x: drag.x, y: drag.y }
     const saved = layoutByName.get(agent.name)
     if (saved?.x !== undefined && saved?.y !== undefined) return { x: saved.x, y: saved.y }
-    return defaultPosition(index)
+    return defaultPosition(defaultIndexByName.get(agent.name) ?? 0, canvasWidth, canvasHeight)
   }
 
-  function handlePointerDown(e: React.PointerEvent, agent: AgentInfo, pos: { x: number; y: number }): void {
-    if (picking) return
-    ;(e.target as Element).setPointerCapture(e.pointerId)
-    dragState.current = {
-      agentName: agent.name,
-      startX: e.clientX,
-      startY: e.clientY,
-      originX: pos.x,
-      originY: pos.y,
-      moved: false
-    }
+  function startDrag(agent: AgentInfo, e: React.PointerEvent<HTMLDivElement>): void {
+    if (agent.isFloorManager) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    suppressClickRef.current = false
+    const start = positionFor(agent)
+    setDrag({ agentName: agent.name, x: start.x, y: start.y, moved: false })
   }
 
-  function handlePointerMove(e: React.PointerEvent): void {
-    const drag = dragState.current
-    if (!drag) return
-    const dx = e.clientX - drag.startX
-    const dy = e.clientY - drag.startY
-    if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
-    drag.moved = true
-    const canvasRect = canvasRef.current?.getBoundingClientRect()
-    let x = drag.originX + dx
-    let y = drag.originY + dy
-    if (canvasRect) {
-      x = Math.max(0, Math.min(x, canvasRect.width - DESK_W))
-      y = Math.max(0, Math.min(y, canvasRect.height - DESK_H))
-    }
-    setDragPositions((prev) => ({ ...prev, [drag.agentName]: { x, y } }))
+  function onDragMove(e: React.PointerEvent<HTMLDivElement>): void {
+    setDrag((prev) => {
+      if (!prev) return prev
+      const moved = prev.moved || Math.abs(e.movementX) + Math.abs(e.movementY) > 2
+      if (moved) suppressClickRef.current = true
+      return {
+        ...prev,
+        x: clamp(prev.x + e.movementX, canvasWidth - DESK_WIDTH),
+        y: clamp(prev.y + e.movementY, canvasHeight - DESK_HEIGHT),
+        moved
+      }
+    })
   }
 
-  function handlePointerUp(e: React.PointerEvent, agent: AgentInfo): void {
-    const drag = dragState.current
-    dragState.current = null
-    if (!drag) return
-    ;(e.target as Element).releasePointerCapture(e.pointerId)
-    if (drag.moved) {
-      const pos = dragPositions[agent.name] ?? { x: drag.originX, y: drag.originY }
-      onMoveDesk(agent.name, pos.x, pos.y)
-    } else if (picking) {
-      onTogglePick(agent.name)
-    } else {
-      onSelectAgent(agent.name)
-    }
+  function endDrag(agent: AgentInfo): void {
+    setDrag((prev) => {
+      if (!prev || prev.agentName !== agent.name) return prev
+      if (prev.moved) onMoveDesk(agent.name, prev.x, prev.y)
+      return null
+    })
   }
 
-  function renderDesk(agent: AgentInfo, index: number): React.JSX.Element {
+  function renderDeskCard(agent: AgentInfo): React.JSX.Element {
     const status = statuses[agent.name] ?? 'idle'
-    const needsBadge = status === 'needs_input' || status === 'error' || status === 'done'
-    const badgeText =
-      status === 'error' ? '!' : status === 'needs_input' ? '?' : status === 'done' ? '✓' : ''
-    const picked = pickedAgents.includes(agent.name)
-    const pos = positionFor(agent, index)
-    const savedAppearance = layoutByName.get(agent.name)
-    const collarStyle =
-      status === 'idle' && savedAppearance?.suitColor
-        ? { background: savedAppearance.suitColor }
-        : undefined
-    const surfaceStyle = savedAppearance?.deskColor
-      ? { background: savedAppearance.deskColor }
-      : undefined
+    const appearance = layoutByName.get(agent.name)
+    const deptColor = departmentColor(departmentOf(agent))
+    const iconBg = appearance?.suitColor ?? deptColor
+    const statusColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] ?? STATUS_COLORS.idle
+    const isCelebrating = celebrating.has(agent.name)
+    const isDragging = drag?.agentName === agent.name
+    const pos = positionFor(agent)
 
     return (
       <div
-        className={`desk-unit desk-unit-free ${agent.name === selectedAgent ? 'desk-unit-selected' : ''} ${picking ? 'desk-unit-picking' : ''} ${picked ? 'desk-unit-picked' : ''}`}
         key={agent.name}
-        style={{ left: pos.x, top: pos.y }}
-        onPointerDown={(e) => handlePointerDown(e, agent, pos)}
-        onPointerMove={handlePointerMove}
-        onPointerUp={(e) => handlePointerUp(e, agent)}
+        ref={(el) => {
+          if (el) deskRefs.current.set(agent.name, el)
+          else deskRefs.current.delete(agent.name)
+        }}
+        className={`desk-card ${agent.name === selectedAgent ? 'desk-card-selected' : ''} ${isCelebrating ? 'desk-card-celebrate' : ''} ${isDragging ? 'desk-card-dragging' : ''} ${agent.isFloorManager ? 'desk-card-pinned' : ''}`}
+        style={{
+          left: pos.x,
+          top: pos.y,
+          ...(isCelebrating ? ({ '--dept-glow': deptColor } as React.CSSProperties) : undefined)
+        }}
+        onPointerDown={(e) => startDrag(agent, e)}
+        onPointerMove={isDragging ? onDragMove : undefined}
+        onPointerUp={() => endDrag(agent)}
+        onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false
+            return
+          }
+          onSelectAgent(agent.name)
+        }}
       >
-        {picking && <div className="desk-pick-check">{picked ? '✓' : ''}</div>}
         <button
           className="desk-edit-button"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             onEditAgent(agent)
@@ -167,38 +257,77 @@ export default function DeskGrid(props: Props): React.JSX.Element {
         >
           ✏️
         </button>
-        <div className="desk-surface junior-surface" style={surfaceStyle}>
-          <div className={`monitor status-${status}`} />
-          <div className="phone" />
-        </div>
-        <div className={`character status-${status}`}>
-          <div className="character-head" />
-          <div className="character-collar" style={collarStyle} />
-          {needsBadge && <div className={`notif-badge ${status}`}>{badgeText}</div>}
-        </div>
-        <div className="char-name">
-          {agent.icon} {agent.name}
-        </div>
-        <div className="char-role">{agent.description ?? agent.model ?? 'Subagent'}</div>
+        {agent.isFloorManager ? (
+          <>
+            <div className="desk-card-name desk-card-ceo-name">{agent.name}</div>
+            <img className="desk-card-ceo-img" src={ceoDeskImg} alt="" draggable={false} />
+            <div className="desk-card-ceo-status-row">
+              <div
+                className="desk-card-status-dot"
+                style={{
+                  background: statusColor,
+                  animation: statusPulses(status as never) ? 'pulseDot 1.6s infinite' : 'none',
+                  boxShadow: `0 0 6px ${statusColor}`
+                }}
+              />
+              <span className="desk-card-activity">
+                {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? 'Idle'}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="desk-card-name">{agent.name}</div>
+            <div className="desk-card-cubicle-wrap">
+              <div className="desk-card-cubicle-inner">
+                <img className="desk-card-cubicle-img" src={cubicleDeskImg} alt="" draggable={false} />
+                <div className="desk-card-cubicle-icon" style={{ background: iconBg }}>
+                  {agent.icon ?? agent.name[0]?.toUpperCase()}
+                </div>
+                <div
+                  className="desk-card-status-dot desk-card-cubicle-dot"
+                  style={{
+                    background: statusColor,
+                    animation: statusPulses(status as never) ? 'pulseDot 1.6s infinite' : 'none',
+                    boxShadow: `0 0 6px ${statusColor}`
+                  }}
+                />
+              </div>
+            </div>
+            <div className="desk-card-meta">
+              {departmentOf(agent)} · {agent.model ?? 'default'}
+            </div>
+            <div className="desk-card-activity">
+              {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? 'Idle'}
+            </div>
+          </>
+        )}
       </div>
     )
   }
 
-  const allDesks = agents.map((a, i) => renderDesk(a, i))
-
   return (
-    <div className="office-floor">
-      <div className="office-floor-bg" />
-      <div className="office-floor-scrim" />
+    <div className="office-floor" ref={officeFloorRef}>
+      <div className="office-floor-bg" style={{ backgroundImage: `url(${floorTileImg})` }} />
+      <DelegationOverlay
+        delegations={activeDelegations.filter((d) => d.status === 'active')}
+        deskRefs={deskRefs.current}
+        containerRef={officeFloorRef}
+      />
       <div className="office-floor-content">
         <div className="office-floor-header">
-          <FloorPicker
-            projects={projects}
-            selectedId={project?.id ?? null}
-            onSelect={onSelectProject}
-            onAdd={onAddProject}
-            onRemove={onRemoveProject}
-          />
+          <div className="office-floor-header-left">
+            <button className="sidebar-toggle" onClick={onToggleSidebar} title="Toggle sidebar">
+              ☰
+            </button>
+            <FloorPicker
+              projects={projects}
+              selectedId={project?.id ?? null}
+              onSelect={onSelectProject}
+              onAdd={onAddProject}
+              onRemove={onRemoveProject}
+            />
+          </div>
           {project && (
             <div className="office-floor-stats">
               <span className="office-stat">
@@ -212,52 +341,88 @@ export default function DeskGrid(props: Props): React.JSX.Element {
               <button className="add-agent-button generate-button" onClick={onGenerateAgents}>
                 🪄 Generate Agents
               </button>
-              <button className="add-agent-button" onClick={onTogglePicking}>
-                {picking ? 'Cancel' : '👥 Group Agents'}
-              </button>
-              {picking && (
-                <button
-                  className="add-agent-button generate-button"
-                  onClick={onCreateGroup}
-                  disabled={pickedAgents.length < 2}
-                >
-                  Create Group ({pickedAgents.length})
-                </button>
-              )}
             </div>
           )}
         </div>
 
-        {!project ? (
-          <div className="empty-floor">Add a project folder to see its agents here.</div>
-        ) : agents.length === 0 ? (
-          <div className="empty-floor">
-            No agents assigned to this folder yet. Add agent definitions under{' '}
-            <code>{project.path}/.claude/agents/*.md</code>, or use{' '}
-            <button className="link-button" onClick={onAddAgent}>
-              + Add Agent
-            </button>
-            .
-          </div>
-        ) : (
-          <>
-            {groups.length > 0 && (
-              <div className="group-legend">
-                {groups.map((g) => (
-                  <div className="group-legend-item" key={g.id}>
-                    👥 {g.name} ({g.agentNames.length})
-                    <button className="delete-group-button" onClick={() => onDeleteGroup(g.id)}>
-                      Ungroup
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          {!sidebarCollapsed && (
+            <div className="app-sidebar">
+              {recentAgents.length > 0 && (
+                <div>
+                  <div className="app-sidebar-section-label">Recent</div>
+                  {recentAgents.map((a) => (
+                    <button
+                      key={a.name}
+                      className="app-sidebar-item"
+                      onClick={() => onSelectAgent(a.name)}
+                    >
+                      <span>{a.icon}</span>
+                      <span>{a.name}</span>
                     </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+              {departmentNames.length > 0 && (
+                <div>
+                  <div className="app-sidebar-section-label">Departments</div>
+                  <button
+                    className={`app-sidebar-dept-item ${deptFilter === null ? 'active' : ''}`}
+                    onClick={onShowAllDepartments}
+                  >
+                    <span>All</span>
+                    <span className="app-sidebar-dept-count">{agents.length}</span>
+                  </button>
+                  {departmentNames.map((dept) => (
+                    <button
+                      key={dept}
+                      className={`app-sidebar-dept-item ${deptFilter === dept ? 'active' : ''}`}
+                      onClick={() => onToggleDept(dept)}
+                    >
+                      <span>{dept}</span>
+                      <span className="app-sidebar-dept-count">{byDepartment.get(dept)!.length}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {!project ? (
+              <div className="office-floor-empty">
+                <div className="empty-floor">Add a project folder to see its agents here.</div>
+              </div>
+            ) : agents.length === 0 ? (
+              <div className="office-floor-empty">
+                <div className="empty-floor">
+                  No agents assigned to this folder yet. Add agent definitions under{' '}
+                  <code>{project.path}/.claude/agents/*.md</code>, or use{' '}
+                  <button className="link-button" onClick={onAddAgent}>
+                    + Add Agent
+                  </button>
+                  .
+                </div>
+              </div>
+            ) : (
+              <div
+                className="floor-canvas-scroll"
+                ref={canvasScrollRef}
+                style={needsScroll ? undefined : { overflow: 'hidden' }}
+              >
+                <div
+                  className="floor-canvas"
+                  style={{ width: canvasWidth, height: canvasHeight }}
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) onDeselectAgent()
+                  }}
+                >
+                  {visibleAgents.map((agent) => renderDeskCard(agent))}
+                </div>
               </div>
             )}
-            <div className="office-floor-canvas" ref={canvasRef}>
-              {allDesks}
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </div>
   )

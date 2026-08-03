@@ -12,10 +12,16 @@ import {
   resetSession,
   sendPrompt
 } from './sessions'
-import { createGroup, deleteGroup, listGroups } from './groups'
 import { answerPermission } from './permissions'
 import { getPermissionMode, setPermissionMode } from './settings'
 import { deleteMockup, listMockups, saveMockup } from './mockups'
+import { ensureTerminal, killAllTerminals, killTerminal, resizeTerminal, writeTerminal } from './terminal'
+import { listDirectory, readFileContents, renamePath, writeFileContents } from './fileExplorer'
+import {
+  buildDelegationBriefing,
+  buildDelegationMcpServer,
+  FLOOR_MANAGER_DISALLOWED_TOOLS
+} from './orchestration'
 import type { MockupScreen, NewAgentInput, PermissionMode } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -80,15 +86,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle('deskLayout:list', (_e, projectId: string) => listDeskLayout(projectId))
 
   ipcMain.handle(
-    'deskLayout:setPosition',
-    (_e, args: { projectId: string; agentName: string; x: number; y: number }) =>
-      setDeskPosition(args.projectId, args.agentName, args.x, args.y)
-  )
-
-  ipcMain.handle(
     'deskLayout:setAppearance',
     (_e, args: { projectId: string; agentName: string; suitColor?: string; deskColor?: string }) =>
       setDeskAppearance(args.projectId, args.agentName, args.suitColor, args.deskColor)
+  )
+
+  ipcMain.handle(
+    'deskLayout:setPosition',
+    (_e, args: { projectId: string; agentName: string; x: number; y: number }) =>
+      setDeskPosition(args.projectId, args.agentName, args.x, args.y)
   )
 
   ipcMain.handle('claude:cliStatus', () => checkClaudeCli())
@@ -97,7 +103,28 @@ function registerIpcHandlers(): void {
     'session:ensure',
     async (_e, args: { projectId: string; projectPath: string; agentName: string }) => {
       if (!mainWindow) throw new Error('No window')
-      const state = await ensureSession(args.projectId, args.projectPath, args.agentName, mainWindow)
+
+      // Only the Floor Manager's session gets the delegate_task tool + delegation
+      // briefing — everyone else starts exactly as before.
+      const roster = await listAgents(args.projectPath)
+      const agent = roster.find((a) => a.name === args.agentName)
+      const extraMcpServers = agent?.isFloorManager
+        ? buildDelegationMcpServer(args.projectId, args.projectPath, args.agentName, mainWindow)
+        : undefined
+      const extraSystemPromptSuffix = agent?.isFloorManager
+        ? buildDelegationBriefing(roster.filter((a) => a.name !== args.agentName))
+        : undefined
+      const extraDisallowedTools = agent?.isFloorManager ? FLOOR_MANAGER_DISALLOWED_TOOLS : undefined
+
+      const state = await ensureSession(
+        args.projectId,
+        args.projectPath,
+        args.agentName,
+        mainWindow,
+        extraMcpServers,
+        extraSystemPromptSuffix,
+        extraDisallowedTools
+      )
       return { key: state.key, status: state.status, resumed: state.resumed, sessionId: state.sessionId }
     }
   )
@@ -127,16 +154,6 @@ function registerIpcHandlers(): void {
     resetSession(args.projectId, args.agentName)
   )
 
-  ipcMain.handle('groups:list', (_e, projectId: string) => listGroups(projectId))
-
-  ipcMain.handle(
-    'groups:create',
-    (_e, args: { projectId: string; name: string; agentNames: string[] }) =>
-      createGroup(args.projectId, args.name, args.agentNames)
-  )
-
-  ipcMain.handle('groups:delete', (_e, groupId: string) => deleteGroup(groupId))
-
   ipcMain.handle('settings:getPermissionMode', (_e, projectId: string) =>
     getPermissionMode(projectId)
   )
@@ -149,8 +166,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'session:permission_response',
-    (_e, args: { toolUseID: string; approved: boolean; reason?: string }) =>
-      answerPermission(args.toolUseID, args.approved, args.reason)
+    (
+      _e,
+      args: {
+        toolUseID: string
+        approved: boolean
+        reason?: string
+        updatedInput?: Record<string, unknown>
+      }
+    ) => answerPermission(args.toolUseID, args.approved, args.reason, args.updatedInput)
   )
 
   ipcMain.handle(
@@ -176,6 +200,46 @@ function registerIpcHandlers(): void {
     (_e, args: { projectPath: string; agentName: string; screenId: string }) =>
       deleteMockup(args.projectPath, args.agentName, args.screenId)
   )
+
+  ipcMain.handle(
+    'terminal:start',
+    (_e, args: { projectId: string; projectPath: string; cols: number; rows: number }) => {
+      if (!mainWindow) throw new Error('No window')
+      return ensureTerminal(args.projectId, args.projectPath, args.cols, args.rows, mainWindow)
+    }
+  )
+
+  ipcMain.handle('terminal:input', (_e, args: { projectId: string; data: string }) =>
+    writeTerminal(args.projectId, args.data)
+  )
+
+  ipcMain.handle(
+    'terminal:resize',
+    (_e, args: { projectId: string; cols: number; rows: number }) =>
+      resizeTerminal(args.projectId, args.cols, args.rows)
+  )
+
+  ipcMain.handle('terminal:kill', (_e, projectId: string) => killTerminal(projectId))
+
+  ipcMain.handle('files:list', (_e, args: { projectPath: string; dirPath: string }) =>
+    listDirectory(args.projectPath, args.dirPath)
+  )
+
+  ipcMain.handle('files:read', (_e, args: { projectPath: string; filePath: string }) =>
+    readFileContents(args.projectPath, args.filePath)
+  )
+
+  ipcMain.handle(
+    'files:write',
+    (_e, args: { projectPath: string; filePath: string; content: string }) =>
+      writeFileContents(args.projectPath, args.filePath, args.content)
+  )
+
+  ipcMain.handle(
+    'files:rename',
+    (_e, args: { projectPath: string; filePath: string; newName: string }) =>
+      renamePath(args.projectPath, args.filePath, args.newName)
+  )
 }
 
 app.whenReady().then(() => {
@@ -194,5 +258,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  killAllTerminals()
   if (process.platform !== 'darwin') app.quit()
 })
+
+app.on('before-quit', () => killAllTerminals())

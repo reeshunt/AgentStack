@@ -42,38 +42,45 @@ export default function GenerateAgentsDialog({
   return (
     <div className="dialog-backdrop active" onClick={busy ? undefined : onClose}>
       <div className="dialog dialog-wide" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-title">🪄 Generate Agents — {projectName}</div>
-        <div className="dialog-body">
-          Pick from a set of ready-made subagents to add to <code>.claude/agents/*.md</code>. Each
-          one starts by reading this project to learn its real stack — nothing is scanned up front.
+        <div className="dialog-header">
+          <div className="dialog-title">🪄 Generate Agents — {projectName}</div>
+          <button className="dialog-close" onClick={onClose} disabled={busy}>
+            ×
+          </button>
         </div>
+        <div className="dialog-content">
+          <div className="dialog-body">
+            Pick from a set of ready-made subagents to add to <code>.claude/agents/*.md</code>. Each
+            one starts by reading this project to learn its real stack — nothing is scanned up front.
+          </div>
 
-        <div className="template-list">
-          {AGENT_TEMPLATES.map((t) => {
-            const alreadyAdded = existing.has(t.name)
-            return (
-              <label
-                key={t.id}
-                className={`template-row${alreadyAdded ? ' template-row-disabled' : ''}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(t.id)}
-                  disabled={alreadyAdded}
-                  onChange={() => toggle(t.id)}
-                />
-                <span className="template-icon">{t.icon}</span>
-                <span className="template-info">
-                  <span className="template-name">
-                    {t.name}
-                    {t.department && <span className="template-department">{t.department}</span>}
-                    {alreadyAdded && <span className="template-department">already added</span>}
+          <div className="template-list">
+            {AGENT_TEMPLATES.map((t) => {
+              const alreadyAdded = existing.has(t.name)
+              return (
+                <label
+                  key={t.id}
+                  className={`template-row${alreadyAdded ? ' template-row-disabled' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(t.id)}
+                    disabled={alreadyAdded}
+                    onChange={() => toggle(t.id)}
+                  />
+                  <span className="template-icon">{t.icon}</span>
+                  <span className="template-info">
+                    <span className="template-name">
+                      {t.name}
+                      {t.department && <span className="template-department">{t.department}</span>}
+                      {alreadyAdded && <span className="template-department">already added</span>}
+                    </span>
+                    <span className="template-description">{t.description}</span>
                   </span>
-                  <span className="template-description">{t.description}</span>
-                </span>
-              </label>
-            )
-          })}
+                </label>
+              )
+            })}
+          </div>
         </div>
 
         <div className="dialog-actions">

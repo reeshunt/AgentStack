@@ -13,10 +13,10 @@ type Row = {
 function rowToLayout(row: Row): DeskLayout {
   return {
     agentName: row.agent_name,
-    x: row.x ?? undefined,
-    y: row.y ?? undefined,
     suitColor: row.suit_color ?? undefined,
-    deskColor: row.desk_color ?? undefined
+    deskColor: row.desk_color ?? undefined,
+    x: row.x ?? undefined,
+    y: row.y ?? undefined
   }
 }
 
@@ -46,10 +46,6 @@ function upsert(projectId: string, agentName: string, fields: Partial<Row>): voi
   })
 }
 
-export function setDeskPosition(projectId: string, agentName: string, x: number, y: number): void {
-  upsert(projectId, agentName, { x, y })
-}
-
 export function setDeskAppearance(
   projectId: string,
   agentName: string,
@@ -57,4 +53,8 @@ export function setDeskAppearance(
   deskColor?: string
 ): void {
   upsert(projectId, agentName, { suit_color: suitColor, desk_color: deskColor })
+}
+
+export function setDeskPosition(projectId: string, agentName: string, x: number, y: number): void {
+  upsert(projectId, agentName, { x, y })
 }

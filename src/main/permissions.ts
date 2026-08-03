@@ -61,10 +61,17 @@ export function requestPermission(
   })
 }
 
-export function answerPermission(toolUseID: string, approved: boolean, reason?: string): void {
+export function answerPermission(
+  toolUseID: string,
+  approved: boolean,
+  reason?: string,
+  updatedInput?: Record<string, unknown>
+): void {
   const entry = pending.get(toolUseID)
   if (!entry) return
   entry.resolve(
-    approved ? { behavior: 'allow' } : { behavior: 'deny', message: reason || 'Denied by user' }
+    approved
+      ? { behavior: 'allow', updatedInput }
+      : { behavior: 'deny', message: reason || 'Denied by user' }
   )
 }

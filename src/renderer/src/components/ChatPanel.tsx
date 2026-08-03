@@ -1,20 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
 import type { AgentInfo, PermissionMode } from '../../../shared/types'
 import type { ChatItem } from '../chatItems'
 import ChatRow from './ChatRow'
 import PreviewPanel from './PreviewPanel'
+import AgentInfoDialog from './AgentInfoDialog'
 import { getSpeechRecognitionCtor, type SpeechRecognitionInstance } from '../speechRecognition'
-
-const STATUS_TEXT: Record<string, string> = {
-  idle: 'Idle',
-  thinking: 'Thinking',
-  running: 'Running',
-  needs_input: 'Needs Input',
-  error: 'Error',
-  done: 'Done'
-}
+import { departmentColor, STATUS_LABELS, UNASSIGNED_DEPARTMENT } from '../theme'
 
 type Props = {
   agent: AgentInfo
@@ -43,11 +36,23 @@ export default function ChatPanel({
 }: Props): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [listening, setListening] = useState(false)
+  const [showAgentInfo, setShowAgentInfo] = useState(false)
   const [focusMode, setFocusMode] = useState(
     () => localStorage.getItem(`calm:${agent.name}`) === '1'
   )
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  const threadRef = useRef<HTMLDivElement>(null)
   const speechSupported = Boolean(getSpeechRecognitionCtor())
+
+  // Keep the thread pinned to the latest message — on new messages, and
+  // whenever we switch to a different agent (or hydrate its prior history).
+  // useLayoutEffect (not useEffect) so the jump happens before paint, avoiding
+  // a visible flash of the top of the conversation first.
+  useLayoutEffect(() => {
+    const el = threadRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [items, agent.name])
 
   useEffect(() => {
     return () => recognitionRef.current?.stop()
@@ -108,16 +113,24 @@ export default function ChatPanel({
     <div className={`agent-chat-panel ${agent.previewUI ? 'has-preview' : ''}`}>
       <div className="agent-chat-column">
       <div className="chat-header">
-        <div className="character" style={{ animation: 'none', marginTop: 0 }}>
-          <div className="character-head" />
-          <div className="character-collar" />
+        <div
+          className="desk-card-icon"
+          style={{ background: departmentColor(agent.department?.trim() || UNASSIGNED_DEPARTMENT) }}
+        >
+          {agent.icon ?? agent.name[0]?.toUpperCase()}
         </div>
         <div className="chat-header-info">
           <div className="chat-header-name">{agent.name}</div>
-          <div className="chat-header-role">
-            {agent.description ?? 'Subagent'} · {agent.model ?? 'default model'}
-          </div>
+          <div className="chat-header-role">{agent.model ?? 'default model'}</div>
         </div>
+        <button
+          className="title-bar-icon"
+          title="Agent info — description and full instructions"
+          onClick={() => setShowAgentInfo(true)}
+          type="button"
+        >
+          ⓘ
+        </button>
         <button
           className="chat-clear-session"
           title="Clear session — forgets this conversation and resumes fresh from the agent's original role, with no memory of anything said before"
@@ -134,7 +147,7 @@ export default function ChatPanel({
 
       <div className="chat-status-row">
         <span className={`agent-status-dot ${status}`} />
-        {STATUS_TEXT[status] ?? status}
+        {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status}
         <select
           className="permission-mode-select"
           value={permissionMode}
@@ -163,7 +176,7 @@ export default function ChatPanel({
         </span>
       </div>
 
-      <div className="chat-thread">
+      <div className="chat-thread" ref={threadRef}>
         {items.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-icon">💬</div>
@@ -171,7 +184,14 @@ export default function ChatPanel({
           </div>
         )}
         {items.map((item) => (
-          <ChatRow key={item.id} item={item} calm={focusMode} />
+          <ChatRow
+            key={item.id}
+            item={item}
+            calm={focusMode}
+            agents={agents}
+            currentAgentName={agent.name}
+            onHandoff={onHandoff}
+          />
         ))}
       </div>
 
@@ -207,6 +227,14 @@ export default function ChatPanel({
           onHandoff={onHandoff}
           onSend={onSend}
           projectPath={projectPath}
+        />
+      )}
+
+      {showAgentInfo && (
+        <AgentInfoDialog
+          agent={agent}
+          projectPath={projectPath}
+          onClose={() => setShowAgentInfo(false)}
         />
       )}
     </div>

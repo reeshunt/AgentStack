@@ -1,7 +1,7 @@
 import type { StreamedMessage } from '../../shared/types'
 
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; source?: 'floor-manager' }
   | { kind: 'assistant-text'; id: string; text: string }
   | { kind: 'tool'; id: string; name: string; input: unknown }
   | { kind: 'error'; id: string; text: string }
@@ -11,7 +11,16 @@ export type ChatItem =
       toolName: string
       input: unknown
       status: 'pending' | 'approved' | 'denied'
-      onDecide: (approved: boolean) => void
+      onDecide: (approved: boolean, updatedInput?: Record<string, unknown>) => void
+    }
+  | {
+      kind: 'delegation-stats'
+      id: string
+      agentName: string
+      status: 'done' | 'error'
+      contextPct: number
+      costUsd: number
+      numTurns: number
     }
 
 let seq = 0
@@ -54,6 +63,16 @@ export function toChatItems(event: { message: StreamedMessage }): ChatItem[] {
   return []
 }
 
-export function userChatItem(text: string): ChatItem {
-  return { kind: 'user', id: nextId(), text }
+export function userChatItem(text: string, source?: 'floor-manager'): ChatItem {
+  return { kind: 'user', id: nextId(), text, source }
+}
+
+export function delegationStatsChatItem(
+  agentName: string,
+  status: 'done' | 'error',
+  contextPct: number,
+  costUsd: number,
+  numTurns: number
+): ChatItem {
+  return { kind: 'delegation-stats', id: nextId(), agentName, status, contextPct, costUsd, numTurns }
 }

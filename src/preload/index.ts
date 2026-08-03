@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AgentGroup,
   AgentInfo,
   ClaudeCliStatus,
   DeskLayout,
+  FileEntry,
   MockupScreen,
   NewAgentInput,
+  OrchestrationEvent,
   PermissionMode,
   PermissionRequest,
   Project,
@@ -36,9 +37,6 @@ const api = {
   listDeskLayout: (projectId: string): Promise<DeskLayout[]> =>
     ipcRenderer.invoke('deskLayout:list', projectId),
 
-  setDeskPosition: (projectId: string, agentName: string, x: number, y: number): Promise<void> =>
-    ipcRenderer.invoke('deskLayout:setPosition', { projectId, agentName, x, y }),
-
   setDeskAppearance: (
     projectId: string,
     agentName: string,
@@ -46,6 +44,9 @@ const api = {
     deskColor?: string
   ): Promise<void> =>
     ipcRenderer.invoke('deskLayout:setAppearance', { projectId, agentName, suitColor, deskColor }),
+
+  setDeskPosition: (projectId: string, agentName: string, x: number, y: number): Promise<void> =>
+    ipcRenderer.invoke('deskLayout:setPosition', { projectId, agentName, x, y }),
 
   claudeCliStatus: (): Promise<ClaudeCliStatus> => ipcRenderer.invoke('claude:cliStatus'),
 
@@ -78,13 +79,6 @@ const api = {
     return () => ipcRenderer.removeListener('session:event', listener)
   },
 
-  listGroups: (projectId: string): Promise<AgentGroup[]> => ipcRenderer.invoke('groups:list', projectId),
-
-  createGroup: (projectId: string, name: string, agentNames: string[]): Promise<AgentGroup> =>
-    ipcRenderer.invoke('groups:create', { projectId, name, agentNames }),
-
-  deleteGroup: (groupId: string): Promise<void> => ipcRenderer.invoke('groups:delete', groupId),
-
   onQuotaUpdate: (callback: (info: QuotaInfo) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: QuotaInfo): void => callback(payload)
     ipcRenderer.on('quota:update', listener)
@@ -97,8 +91,13 @@ const api = {
   setPermissionMode: (projectId: string, mode: PermissionMode): Promise<void> =>
     ipcRenderer.invoke('settings:setPermissionMode', { projectId, mode }),
 
-  respondToPermission: (toolUseID: string, approved: boolean, reason?: string): Promise<void> =>
-    ipcRenderer.invoke('session:permission_response', { toolUseID, approved, reason }),
+  respondToPermission: (
+    toolUseID: string,
+    approved: boolean,
+    reason?: string,
+    updatedInput?: Record<string, unknown>
+  ): Promise<void> =>
+    ipcRenderer.invoke('session:permission_response', { toolUseID, approved, reason, updatedInput }),
 
   onPermissionRequest: (callback: (request: PermissionRequest) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: PermissionRequest): void =>
@@ -117,7 +116,59 @@ const api = {
   ): Promise<MockupScreen> => ipcRenderer.invoke('mockups:save', { projectPath, agentName, screen }),
 
   deleteMockup: (projectPath: string, agentName: string, screenId: string): Promise<void> =>
-    ipcRenderer.invoke('mockups:delete', { projectPath, agentName, screenId })
+    ipcRenderer.invoke('mockups:delete', { projectPath, agentName, screenId }),
+
+  startTerminal: (
+    projectId: string,
+    projectPath: string,
+    cols: number,
+    rows: number
+  ): Promise<{ started: boolean }> =>
+    ipcRenderer.invoke('terminal:start', { projectId, projectPath, cols, rows }),
+
+  writeTerminal: (projectId: string, data: string): Promise<void> =>
+    ipcRenderer.invoke('terminal:input', { projectId, data }),
+
+  resizeTerminal: (projectId: string, cols: number, rows: number): Promise<void> =>
+    ipcRenderer.invoke('terminal:resize', { projectId, cols, rows }),
+
+  killTerminal: (projectId: string): Promise<void> => ipcRenderer.invoke('terminal:kill', projectId),
+
+  onTerminalData: (callback: (payload: { projectId: string; data: string }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string; data: string }): void =>
+      callback(payload)
+    ipcRenderer.on('terminal:data', listener)
+    return () => ipcRenderer.removeListener('terminal:data', listener)
+  },
+
+  onTerminalExit: (callback: (payload: { projectId: string }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string }): void =>
+      callback(payload)
+    ipcRenderer.on('terminal:exit', listener)
+    return () => ipcRenderer.removeListener('terminal:exit', listener)
+  },
+
+  onOrchestrationEvent: (callback: (event: OrchestrationEvent) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, payload: OrchestrationEvent): void =>
+      callback(payload)
+    ipcRenderer.on('orchestration:event', listener)
+    return () => ipcRenderer.removeListener('orchestration:event', listener)
+  },
+
+  listDirectory: (projectPath: string, dirPath: string): Promise<FileEntry[]> =>
+    ipcRenderer.invoke('files:list', { projectPath, dirPath }),
+
+  readFile: (
+    projectPath: string,
+    filePath: string
+  ): Promise<{ content: string; binary: boolean; truncated: boolean }> =>
+    ipcRenderer.invoke('files:read', { projectPath, filePath }),
+
+  writeFile: (projectPath: string, filePath: string, content: string): Promise<void> =>
+    ipcRenderer.invoke('files:write', { projectPath, filePath, content }),
+
+  renamePath: (projectPath: string, filePath: string, newName: string): Promise<FileEntry> =>
+    ipcRenderer.invoke('files:rename', { projectPath, filePath, newName })
 }
 
 export type AgentStackApi = typeof api

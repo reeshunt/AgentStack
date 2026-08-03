@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentGroup,
   AgentInfo,
   ClaudeCliStatus,
   DeskLayout,
   NewAgentInput,
+  OrchestrationEvent,
   PermissionMode,
   Project,
   QuotaInfo
@@ -15,10 +15,14 @@ import ChatPanel from './components/ChatPanel'
 import AddAgentDialog from './components/AddAgentDialog'
 import EditAgentDialog from './components/EditAgentDialog'
 import GenerateAgentsDialog from './components/GenerateAgentsDialog'
-import NameGroupDialog from './components/NameGroupDialog'
 import QuotaBadge from './components/QuotaBadge'
+import TerminalPanel from './components/TerminalPanel'
+import FileViewer from './components/FileViewer'
 import { AGENT_TEMPLATES } from '../../shared/agentTemplates'
-import { toChatItems, userChatItem, type ChatItem } from './chatItems'
+import { delegationStatsChatItem, toChatItems, userChatItem, type ChatItem } from './chatItems'
+import { playBellSound } from './sound'
+
+const CELEBRATE_DURATION_MS = 4000
 
 let itemSeq = 0
 function historyChatItem(role: 'user' | 'assistant', text: string): ChatItem {
@@ -41,11 +45,15 @@ export default function App(): React.JSX.Element {
   const [editingAgent, setEditingAgent] = useState<AgentInfo | null>(null)
   const [deskLayoutByProject, setDeskLayoutByProject] = useState<Record<string, DeskLayout[]>>({})
   const [showGenerateDialog, setShowGenerateDialog] = useState(false)
-  const [groupsByProject, setGroupsByProject] = useState<Record<string, AgentGroup[]>>({})
-  const [picking, setPicking] = useState(false)
-  const [pickedAgents, setPickedAgents] = useState<string[]>([])
-  const [showNameGroup, setShowNameGroup] = useState(false)
   const [quota, setQuota] = useState<QuotaInfo | null>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [terminalCollapsed, setTerminalCollapsed] = useState(true)
+  const [viewMode, setViewMode] = useState<'floor' | 'files'>('floor')
+  const [orchestrationEvents, setOrchestrationEvents] = useState<OrchestrationEvent[]>([])
+  const [recentAgentNames, setRecentAgentNames] = useState<string[]>([])
+  const [deptFilter, setDeptFilter] = useState<string | null>(null)
+  const [celebratingKeys, setCelebratingKeys] = useState<Set<string>>(new Set())
+  const celebrateTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [permissionModeByProject, setPermissionModeByProject] = useState<
     Record<string, PermissionMode>
   >({})
@@ -62,17 +70,72 @@ export default function App(): React.JSX.Element {
     return window.agentstack.onQuotaUpdate(setQuota)
   }, [])
 
+  // Drives the dashed-line overlay ('active' registers a delegation, 'done'/'error' clears
+  // it) and appends chat items on both ends: the delegated task shows up tagged in the
+  // worker's own thread, and a stats card lands in the Floor Manager's thread once it settles.
+  useEffect(() => {
+    return window.agentstack.onOrchestrationEvent((event) => {
+      setOrchestrationEvents((prev) => {
+        const withoutId = prev.filter((e) => e.id !== event.id)
+        return event.status === 'active' ? [...withoutId, event] : withoutId
+      })
+
+      if (event.status === 'active' && event.task) {
+        const workerKey = sessionKey(event.projectId, event.to)
+        setChatLogs((prev) => ({
+          ...prev,
+          [workerKey]: [...(prev[workerKey] ?? []), userChatItem(event.task!, 'floor-manager')]
+        }))
+      }
+
+      if ((event.status === 'done' || event.status === 'error') && event.stats) {
+        const fmKey = sessionKey(event.projectId, event.from)
+        const { contextPct, costUsd, numTurns } = event.stats
+        setChatLogs((prev) => ({
+          ...prev,
+          [fmKey]: [
+            ...(prev[fmKey] ?? []),
+            delegationStatsChatItem(event.to, event.status as 'done' | 'error', contextPct, costUsd, numTurns)
+          ]
+        }))
+      }
+    })
+  }, [])
+
+  function celebrateCompletion(key: string): void {
+    playBellSound()
+    setCelebratingKeys((prev) => new Set(prev).add(key))
+    clearTimeout(celebrateTimers.current[key])
+    celebrateTimers.current[key] = setTimeout(() => {
+      setCelebratingKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      delete celebrateTimers.current[key]
+    }, CELEBRATE_DURATION_MS)
+  }
+
   useEffect(() => {
     return window.agentstack.onSessionEvent((event) => {
-      setStatuses((prev) => ({ ...prev, [event.key]: event.status }))
+      setStatuses((prev) => {
+        if (event.status === 'done' && prev[event.key] !== 'done') celebrateCompletion(event.key)
+        return { ...prev, [event.key]: event.status }
+      })
       const newItems = toChatItems(event)
       if (newItems.length === 0) return
       setChatLogs((prev) => ({ ...prev, [event.key]: [...(prev[event.key] ?? []), ...newItems] }))
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function handlePermissionDecision(key: string, toolUseID: string, approved: boolean): void {
-    window.agentstack.respondToPermission(toolUseID, approved)
+  function handlePermissionDecision(
+    key: string,
+    toolUseID: string,
+    approved: boolean,
+    updatedInput?: Record<string, unknown>
+  ): void {
+    window.agentstack.respondToPermission(toolUseID, approved, undefined, updatedInput)
     setStatuses((prev) => ({ ...prev, [key]: 'running' }))
     setChatLogs((prev) => ({
       ...prev,
@@ -97,8 +160,8 @@ export default function App(): React.JSX.Element {
             toolName: request.toolName,
             input: request.toolInput,
             status: 'pending',
-            onDecide: (approved: boolean) =>
-              handlePermissionDecision(request.key, request.toolUseID, approved)
+            onDecide: (approved: boolean, updatedInput?: Record<string, unknown>) =>
+              handlePermissionDecision(request.key, request.toolUseID, approved, updatedInput)
           }
         ]
       }))
@@ -138,19 +201,6 @@ export default function App(): React.JSX.Element {
     setPermissionModeByProject((prev) => ({ ...prev, [selectedProject.id]: mode }))
   }
 
-  function refreshGroups(projectId: string): void {
-    window.agentstack.listGroups(projectId).then((groups) => {
-      setGroupsByProject((prev) => ({ ...prev, [projectId]: groups }))
-    })
-  }
-
-  useEffect(() => {
-    if (!selectedProject) return
-    if (groupsByProject[selectedProject.id]) return
-    refreshGroups(selectedProject.id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject, groupsByProject])
-
   function refreshDeskLayout(projectId: string): void {
     window.agentstack.listDeskLayout(projectId).then((layout) => {
       setDeskLayoutByProject((prev) => ({ ...prev, [projectId]: layout }))
@@ -163,21 +213,6 @@ export default function App(): React.JSX.Element {
     refreshDeskLayout(selectedProject.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject, deskLayoutByProject])
-
-  function handleMoveDesk(agentName: string, x: number, y: number): void {
-    if (!selectedProject) return
-    const projectId = selectedProject.id
-    window.agentstack.setDeskPosition(projectId, agentName, x, y)
-    setDeskLayoutByProject((prev) => {
-      const existing = prev[projectId] ?? []
-      const idx = existing.findIndex((l) => l.agentName === agentName)
-      const next =
-        idx >= 0
-          ? existing.map((l, i) => (i === idx ? { ...l, x, y } : l))
-          : [...existing, { agentName, x, y }]
-      return { ...prev, [projectId]: next }
-    })
-  }
 
   async function handleUpdateAgent(filePath: string, input: NewAgentInput): Promise<void> {
     if (!selectedProject) return
@@ -205,6 +240,21 @@ export default function App(): React.JSX.Element {
     })
   }
 
+  async function handleMoveDesk(agentName: string, x: number, y: number): Promise<void> {
+    if (!selectedProject) return
+    const projectId = selectedProject.id
+    await window.agentstack.setDeskPosition(projectId, agentName, x, y)
+    setDeskLayoutByProject((prev) => {
+      const existing = prev[projectId] ?? []
+      const idx = existing.findIndex((l) => l.agentName === agentName)
+      const next =
+        idx >= 0
+          ? existing.map((l, i) => (i === idx ? { ...l, x, y } : l))
+          : [...existing, { agentName, x, y }]
+      return { ...prev, [projectId]: next }
+    })
+  }
+
   const agents = selectedProject ? (agentsByProject[selectedProject.id] ?? []) : []
   const selectedAgent = agents.find((a) => a.name === selectedAgentName) ?? null
 
@@ -222,6 +272,19 @@ export default function App(): React.JSX.Element {
     }
     return result
   }, [statuses, selectedProject])
+
+  const floorDelegations = useMemo(() => {
+    if (!selectedProject) return []
+    return orchestrationEvents.filter((e) => e.projectId === selectedProject.id)
+  }, [orchestrationEvents, selectedProject])
+
+  const floorCelebrating = useMemo(() => {
+    if (!selectedProject) return []
+    const prefix = `${selectedProject.id}::`
+    return [...celebratingKeys]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length))
+  }, [celebratingKeys, selectedProject])
 
   async function handleAddProject(): Promise<void> {
     const project = await window.agentstack.pickProject()
@@ -245,6 +308,7 @@ export default function App(): React.JSX.Element {
   async function handleSelectAgent(agentName: string): Promise<void> {
     if (!selectedProject) return
     setSelectedAgentName(agentName)
+    setRecentAgentNames((prev) => [agentName, ...prev.filter((n) => n !== agentName)].slice(0, 5))
     const key = sessionKey(selectedProject.id, agentName)
     const result = await window.agentstack.ensureSession(selectedProject.id, selectedProject.path, agentName)
 
@@ -282,13 +346,27 @@ export default function App(): React.JSX.Element {
 
   async function handleHandoff(targetAgentName: string, promptText: string): Promise<void> {
     if (!selectedProject) return
-    await handleSelectAgent(targetAgentName)
     const key = sessionKey(selectedProject.id, targetAgentName)
-    setChatLogs((prev) => ({
-      ...prev,
-      [key]: [...(prev[key] ?? []), userChatItem(promptText)]
-    }))
-    await window.agentstack.sendPrompt(selectedProject.id, targetAgentName, promptText)
+    try {
+      await handleSelectAgent(targetAgentName)
+      setChatLogs((prev) => ({
+        ...prev,
+        [key]: [...(prev[key] ?? []), userChatItem(promptText)]
+      }))
+      await window.agentstack.sendPrompt(selectedProject.id, targetAgentName, promptText)
+    } catch (err) {
+      // Surface handoff failures instead of letting the rejected promise vanish
+      // silently — without this, a failed session:ensure/sendPrompt call left
+      // the user staring at an empty chat with no indication anything went wrong.
+      const message = err instanceof Error ? err.message : String(err)
+      setChatLogs((prev) => ({
+        ...prev,
+        [key]: [
+          ...(prev[key] ?? []),
+          { kind: 'error', id: `handoff-error-${Date.now()}`, text: `Hand-off to ${targetAgentName} failed: ${message}` }
+        ]
+      }))
+    }
   }
 
   async function handleCreateAgent(input: NewAgentInput): Promise<void> {
@@ -315,6 +393,7 @@ export default function App(): React.JSX.Element {
         icon: t.icon,
         department: t.department,
         previewUI: t.previewUI,
+        isFloorManager: t.isFloorManager,
         systemPrompt: t.systemPrompt
       })
     }
@@ -322,40 +401,27 @@ export default function App(): React.JSX.Element {
     setShowGenerateDialog(false)
   }
 
-  function handleTogglePicking(): void {
-    setPicking((prev) => !prev)
-    setPickedAgents([])
-  }
-
-  function handleTogglePick(agentName: string): void {
-    setPickedAgents((prev) =>
-      prev.includes(agentName) ? prev.filter((n) => n !== agentName) : [...prev, agentName]
-    )
-  }
-
-  async function handleConfirmGroup(name: string): Promise<void> {
-    if (!selectedProject) return
-    await window.agentstack.createGroup(selectedProject.id, name, pickedAgents)
-    refreshGroups(selectedProject.id)
-    setShowNameGroup(false)
-    setPicking(false)
-    setPickedAgents([])
-  }
-
-  async function handleDeleteGroup(groupId: string): Promise<void> {
-    if (!selectedProject) return
-    await window.agentstack.deleteGroup(groupId)
-    refreshGroups(selectedProject.id)
-  }
-
-  const groups = selectedProject ? (groupsByProject[selectedProject.id] ?? []) : []
-
   return (
     <div className="app-shell">
       <div className="title-bar">
         <div className="title-bar-left">
           <span className="logo-mark">◆</span>
           <span>AgentStack</span>
+        </div>
+        <div className="view-mode-switch">
+          <button
+            className={`view-mode-tab ${viewMode === 'floor' ? 'active' : ''}`}
+            onClick={() => setViewMode('floor')}
+          >
+            Floor
+          </button>
+          <button
+            className={`view-mode-tab ${viewMode === 'files' ? 'active' : ''}`}
+            onClick={() => setViewMode('files')}
+            disabled={!selectedProject}
+          >
+            File Viewer
+          </button>
         </div>
         <div className="title-bar-right">
           <QuotaBadge quota={quota} />
@@ -365,18 +431,27 @@ export default function App(): React.JSX.Element {
               {cliStatus.available ? 'Claude CLI ready' : 'Claude CLI not found'}
             </span>
           )}
-          <span className="title-bar-icon">⚙</span>
-          <span className="title-bar-icon">🔔</span>
+          <button className="title-bar-icon">⚙</button>
+          <button className="title-bar-icon">🔔</button>
           <span className="title-bar-avatar">A</span>
         </div>
       </div>
 
-      <div className="office-body">
+      {selectedProject && (
+        <FileViewer
+          key={selectedProject.id}
+          projectPath={selectedProject.path}
+          hidden={viewMode !== 'files'}
+        />
+      )}
+
+      <div className={`office-body ${viewMode === 'files' ? 'view-hidden' : ''}`}>
         <DeskGrid
           project={selectedProject}
           projects={projects}
           agents={agents}
           statuses={floorStatuses}
+          celebratingAgents={floorCelebrating}
           selectedAgent={selectedAgentName}
           onSelectProject={(id) => {
             setSelectedProjectId(id)
@@ -388,15 +463,16 @@ export default function App(): React.JSX.Element {
           onAddAgent={() => setShowAddAgent(true)}
           onEditAgent={(agent) => setEditingAgent(agent)}
           layout={selectedProject ? (deskLayoutByProject[selectedProject.id] ?? []) : []}
+          activeDelegations={floorDelegations}
           onMoveDesk={handleMoveDesk}
+          onDeselectAgent={() => setSelectedAgentName(null)}
           onGenerateAgents={handleGenerateAgents}
-          groups={groups}
-          picking={picking}
-          pickedAgents={pickedAgents}
-          onTogglePicking={handleTogglePicking}
-          onTogglePick={handleTogglePick}
-          onCreateGroup={() => setShowNameGroup(true)}
-          onDeleteGroup={handleDeleteGroup}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
+          recentAgentNames={recentAgentNames}
+          deptFilter={deptFilter}
+          onToggleDept={(dept) => setDeptFilter((prev) => (prev === dept ? null : dept))}
+          onShowAllDepartments={() => setDeptFilter(null)}
         />
 
         {selectedAgent && activeKey && selectedProject ? (
@@ -421,6 +497,16 @@ export default function App(): React.JSX.Element {
           </div>
         )}
       </div>
+
+      {selectedProject && (
+        <TerminalPanel
+          key={selectedProject.id}
+          projectId={selectedProject.id}
+          projectPath={selectedProject.path}
+          collapsed={terminalCollapsed}
+          onToggleCollapsed={() => setTerminalCollapsed((prev) => !prev)}
+        />
+      )}
 
       {showAddAgent && (
         <AddAgentDialog onCancel={() => setShowAddAgent(false)} onCreate={handleCreateAgent} />
@@ -447,14 +533,6 @@ export default function App(): React.JSX.Element {
           existingNames={agents.map((a) => a.name)}
           onClose={() => setShowGenerateDialog(false)}
           onCreate={handleCreateFromTemplates}
-        />
-      )}
-
-      {showNameGroup && (
-        <NameGroupDialog
-          count={pickedAgents.length}
-          onCancel={() => setShowNameGroup(false)}
-          onConfirm={handleConfirmGroup}
         />
       )}
     </div>

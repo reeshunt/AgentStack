@@ -401,15 +401,29 @@ export default function PreviewPanel({
 
               <div className={`preview-frame-wrap ${annotating && isMockupsTab ? 'annotating' : ''}`}>
                 <div className={`preview-detail-frame ${tab === 'wireframes' ? 'wireframe' : ''}`}>
-                  <iframe
-                    key={active.id + tab}
-                    ref={iframeRef}
-                    title={active.title}
-                    srcDoc={frameSrcDoc(active)}
-                    sandbox="allow-scripts allow-same-origin"
-                    onLoad={onFrameLoad}
-                    style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
-                  />
+                  {/* Counter-scaled stage: sized to (100/zoom)% so that scaling it by `zoom`
+                      always renders back to exactly fill the frame. Zoomed out, the content
+                      shrinks and stays centered/filling the frame instead of leaving blank
+                      space in a corner; zoomed in, the stage grows past the frame bounds and
+                      the frame's own overflow:auto lets you scroll to pan around it. */}
+                  <div
+                    className="preview-frame-stage"
+                    style={{
+                      width: `${100 / zoom}%`,
+                      height: `${100 / zoom}%`,
+                      transform: `scale(${zoom})`,
+                      transformOrigin: 'top left'
+                    }}
+                  >
+                    <iframe
+                      key={active.id + tab}
+                      ref={iframeRef}
+                      title={active.title}
+                      srcDoc={frameSrcDoc(active)}
+                      sandbox="allow-scripts allow-same-origin"
+                      onLoad={onFrameLoad}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -430,8 +444,8 @@ export default function PreviewPanel({
                           width: 22,
                           height: 22,
                           borderRadius: '50%',
-                          background: '#6366f1',
-                          color: '#fff',
+                          background: 'oklch(0.78 0.14 75)',
+                          color: 'oklch(0.16 0.02 60)',
                           fontSize: 11,
                           fontWeight: 700,
                           fontFamily: 'system-ui, sans-serif',
