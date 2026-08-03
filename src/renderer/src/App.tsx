@@ -344,6 +344,11 @@ export default function App(): React.JSX.Element {
     setHydratedKeys((prev) => ({ ...prev, [key]: false }))
   }
 
+  async function handleInterrupt(): Promise<void> {
+    if (!selectedProject || !selectedAgentName) return
+    await window.agentstack.interruptSession(selectedProject.id, selectedAgentName)
+  }
+
   async function handleHandoff(targetAgentName: string, promptText: string): Promise<void> {
     if (!selectedProject) return
     const key = sessionKey(selectedProject.id, targetAgentName)
@@ -487,6 +492,7 @@ export default function App(): React.JSX.Element {
             onHandoff={handleHandoff}
             projectPath={selectedProject.path}
             onClearSession={handleClearSession}
+            onInterrupt={handleInterrupt}
           />
         ) : (
           <div className="agent-chat-panel">

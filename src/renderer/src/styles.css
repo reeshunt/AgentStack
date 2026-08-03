@@ -580,6 +580,13 @@ body {
 }
 .chat-send:disabled { opacity: 0.4; cursor: default; }
 
+.chat-stop {
+  background: transparent; color: var(--color-status-error); border: 1px solid var(--color-status-error);
+  border-radius: var(--radius-sm); padding: 7px 16px; cursor: pointer; font-size: 12px; font-weight: 600;
+}
+.chat-stop:hover:not(:disabled) { background: var(--color-status-error); color: var(--color-neutral-950, #0a0a0a); }
+.chat-stop:disabled { opacity: 0.6; cursor: default; }
+
 .chat-mic {
   background: var(--color-neutral-900); border: 1px solid var(--color-neutral-800); color: var(--color-neutral-300);
   border-radius: var(--radius-sm); width: 28px; height: 28px; flex-shrink: 0; cursor: pointer; font-size: 13px;
