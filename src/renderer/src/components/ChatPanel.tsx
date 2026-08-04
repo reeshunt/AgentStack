@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
+// Speech-to-text mic is temporarily hidden from the UI (kept wired up for a future re-enable).
+const MIC_ENABLED = false
+
 import type { AgentInfo, PermissionMode } from '../../../shared/types'
 import type { ChatItem } from '../chatItems'
 import ChatRow from './ChatRow'
@@ -93,8 +96,11 @@ export default function ChatPanel({
     setDraft('')
   }
 
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac) sends the message.
+    // Plain Enter and Shift+Enter both fall through to the textarea's
+    // default behavior and insert a newline.
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       submit()
     }
@@ -212,7 +218,7 @@ export default function ChatPanel({
       </div>
 
       <div className="chat-input-row">
-        {speechSupported && (
+        {MIC_ENABLED && speechSupported && (
           <button
             className={`chat-mic ${listening ? 'chat-mic-active' : ''}`}
             onClick={toggleListening}
@@ -222,12 +228,15 @@ export default function ChatPanel({
             {listening ? '⏺' : '🎤'}
           </button>
         )}
-        <input
+        <textarea
           className="chat-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={listening ? 'Listening…' : `Message ${agent.name}...`}
+          placeholder={
+            listening ? 'Listening…' : `Message ${agent.name}... (Ctrl/Cmd+Enter to send)`
+          }
+          rows={4}
         />
         {isBusy ? (
           <button
