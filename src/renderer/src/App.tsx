@@ -221,6 +221,13 @@ export default function App(): React.JSX.Element {
     setEditingAgent(null)
   }
 
+  async function handleDeleteAgent(agent: AgentInfo): Promise<void> {
+    if (!selectedProject) return
+    await window.agentstack.deleteAgent(agent.filePath)
+    refreshAgents(selectedProject.id, selectedProject.path)
+    if (selectedAgentName === agent.name) setSelectedAgentName(null)
+  }
+
   async function handleUpdateAppearance(
     agentName: string,
     suitColor?: string,
@@ -467,6 +474,7 @@ export default function App(): React.JSX.Element {
           onSelectAgent={handleSelectAgent}
           onAddAgent={() => setShowAddAgent(true)}
           onEditAgent={(agent) => setEditingAgent(agent)}
+          onDeleteAgent={handleDeleteAgent}
           layout={selectedProject ? (deskLayoutByProject[selectedProject.id] ?? []) : []}
           activeDelegations={floorDelegations}
           onMoveDesk={handleMoveDesk}

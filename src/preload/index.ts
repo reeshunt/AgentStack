@@ -28,6 +28,8 @@ const api = {
   updateAgent: (filePath: string, input: NewAgentInput): Promise<AgentInfo> =>
     ipcRenderer.invoke('agents:update', { filePath, input }),
 
+  deleteAgent: (filePath: string): Promise<void> => ipcRenderer.invoke('agents:delete', filePath),
+
   readAgentPrompt: (
     projectPath: string,
     agentName: string

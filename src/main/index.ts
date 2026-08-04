@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { addProject, listProjects, removeProject } from './projectRegistry'
-import { createAgent, listAgents, readAgentPrompt, updateAgent } from './agents'
+import { createAgent, deleteAgent, listAgents, readAgentPrompt, updateAgent } from './agents'
 import { listDeskLayout, setDeskAppearance, setDeskPosition } from './deskLayout'
 import { checkClaudeCli } from './claudeCli'
 import { sessionService } from './services/SessionService'
@@ -94,6 +94,8 @@ function registerIpcHandlers(): void {
     (_e, args: { filePath: string; input: NewAgentInput }) =>
       updateAgent(args.filePath, args.input)
   )
+
+  ipcMain.handle('agents:delete', (_e, filePath: string) => deleteAgent(filePath))
 
   ipcMain.handle(
     'agents:readPrompt',

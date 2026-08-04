@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import matter from 'gray-matter'
 import type { AgentInfo, NewAgentInput } from '../shared/types'
@@ -155,6 +155,10 @@ export async function createAgent(projectPath: string, input: NewAgentInput): Pr
     isFloorManager: input.isFloorManager ?? false,
     filePath
   }
+}
+
+export async function deleteAgent(filePath: string): Promise<void> {
+  if (existsSync(filePath)) await unlink(filePath)
 }
 
 export async function updateAgent(

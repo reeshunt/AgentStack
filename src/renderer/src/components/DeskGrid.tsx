@@ -24,6 +24,7 @@ type Props = {
   onSelectAgent: (agentName: string) => void
   onAddAgent: () => void
   onEditAgent: (agent: AgentInfo) => void
+  onDeleteAgent: (agent: AgentInfo) => void
   onGenerateAgents: () => void
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
@@ -105,6 +106,7 @@ export default function DeskGrid(props: Props): React.JSX.Element {
     onSelectAgent,
     onAddAgent,
     onEditAgent,
+    onDeleteAgent,
     onGenerateAgents,
     sidebarCollapsed,
     onToggleSidebar,
@@ -121,7 +123,9 @@ export default function DeskGrid(props: Props): React.JSX.Element {
   const officeFloorRef = useRef<HTMLDivElement>(null)
   const canvasScrollRef = useRef<HTMLDivElement>(null)
   const deskRefs = useRef(new Map<string, HTMLDivElement>())
+  const trashRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [hoveringTrash, setHoveringTrash] = useState(false)
   // Measured size of the visible floor area — used as the canvas size for small rosters so
   // the floor exactly fills the viewport with no scrollbar, instead of always padding out to
   // the large fixed canvas.
@@ -202,7 +206,17 @@ export default function DeskGrid(props: Props): React.JSX.Element {
     setDrag({ agentName: agent.name, x: start.x, y: start.y, moved: false })
   }
 
+  function isOverTrash(clientX: number, clientY: number): boolean {
+    const el = trashRef.current
+    if (!el) return false
+    const rect = el.getBoundingClientRect()
+    return (
+      clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+    )
+  }
+
   function onDragMove(e: React.PointerEvent<HTMLDivElement>): void {
+    setHoveringTrash(isOverTrash(e.clientX, e.clientY))
     setDrag((prev) => {
       if (!prev) return prev
       const moved = prev.moved || Math.abs(e.movementX) + Math.abs(e.movementY) > 2
@@ -240,9 +254,17 @@ export default function DeskGrid(props: Props): React.JSX.Element {
   }
 
   function endDrag(agent: AgentInfo): void {
+    const droppedOnTrash = hoveringTrash
+    setHoveringTrash(false)
     setDrag((prev) => {
       if (!prev || prev.agentName !== agent.name) return prev
-      if (prev.moved) onMoveDesk(agent.name, prev.x, prev.y)
+      if (prev.moved && droppedOnTrash) {
+        if (window.confirm(`Delete agent "${agent.name}"? This removes its agent file from disk.`)) {
+          onDeleteAgent(agent)
+        }
+      } else if (prev.moved) {
+        onMoveDesk(agent.name, prev.x, prev.y)
+      }
       return null
     })
   }
@@ -354,6 +376,15 @@ export default function DeskGrid(props: Props): React.JSX.Element {
         deskRefs={deskRefs.current}
         containerRef={officeFloorRef}
       />
+      {drag && (
+        <div
+          ref={trashRef}
+          className={`desk-trash-zone ${hoveringTrash ? 'desk-trash-zone-active' : ''}`}
+          title="Drop here to delete agent"
+        >
+          🗑️
+        </div>
+      )}
       <div className="office-floor-content">
         <div className="office-floor-header">
           <div className="office-floor-header-left">
