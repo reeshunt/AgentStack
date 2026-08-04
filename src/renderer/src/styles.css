@@ -233,6 +233,16 @@ body {
   image-rendering: pixelated;
   filter: brightness(0.4) saturate(0.7) sepia(0.15);
 }
+/* The actual office floor art. Lives *inside* .floor-canvas (not the outer
+   .office-floor-bg) so the CSS zoom transform on the canvas scales it right along
+   with the desks sitting on it. pointer-events: none lets clicks on empty floor
+   still fall through to .floor-canvas's click-to-deselect handler. */
+.floor-canvas-bg {
+  position: absolute; inset: 0; z-index: 0;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+}
 .office-floor-content { position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .office-floor-header {
   display: flex; justify-content: space-between; align-items: center; gap: var(--space-3);
@@ -347,7 +357,7 @@ body {
   font-size: 12.5px; font-weight: 600; color: var(--color-neutral-100); text-align: center;
   margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.desk-card-ceo-img { width: 100%; height: auto; display: block; image-rendering: pixelated; -webkit-user-drag: none; }
+.desk-card-ceo-sprite-wrap { width: 100%; }
 .desk-card-ceo-status-row {
   display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px;
 }

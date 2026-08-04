@@ -4,12 +4,13 @@
 import 'pixi.js/unsafe-eval'
 import { Rectangle, Texture } from 'pixi.js'
 import devSpritesheetUrl from '../../../../resources/assets/spritesheets/dev/dev.png'
+import devopsSpritesheetUrl from '../../../../resources/assets/spritesheets/devops/devops.png'
+import floorManagerSpritesheetUrl from '../../../../resources/assets/spritesheets/floorManager/FloorManager.png'
 
-// dev.png is one row of 5 equal-width character-at-desk frames used as the idle/typing
-// animation for every agent desk except the Floor Manager's.
+// Each spritesheet is one row of 5 equal-width character-at-desk frames used as the
+// idle/typing animation for an agent desk. dev.png is the default for every desk except the
+// DevOps/Infra agent (devops.png) and the Floor Manager (FloorManager.png).
 const FRAME_COUNT = 5
-
-let framesPromise: Promise<Texture[]> | null = null
 
 // Loaded via a plain <img> + Texture.from rather than PIXI.Assets: Assets' loader probes
 // avif/webp support with data-URI images and spins up a worker for createImageBitmap, both
@@ -23,21 +24,28 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   })
 }
 
-export function loadDevFrames(): Promise<Texture[]> {
-  if (!framesPromise) {
-    framesPromise = loadImage(devSpritesheetUrl).then((img) => {
-      const baseTexture = Texture.from(img)
-      const frameWidth = img.naturalWidth / FRAME_COUNT
-      const frameHeight = img.naturalHeight
-      return Array.from(
-        { length: FRAME_COUNT },
-        (_, i) =>
-          new Texture({
-            source: baseTexture.source,
-            frame: new Rectangle(i * frameWidth, 0, frameWidth, frameHeight)
-          })
-      )
-    })
+function createFrameLoader(url: string): () => Promise<Texture[]> {
+  let framesPromise: Promise<Texture[]> | null = null
+  return () => {
+    if (!framesPromise) {
+      framesPromise = loadImage(url).then((img) => {
+        const baseTexture = Texture.from(img)
+        const frameWidth = img.naturalWidth / FRAME_COUNT
+        const frameHeight = img.naturalHeight
+        return Array.from(
+          { length: FRAME_COUNT },
+          (_, i) =>
+            new Texture({
+              source: baseTexture.source,
+              frame: new Rectangle(i * frameWidth, 0, frameWidth, frameHeight)
+            })
+        )
+      })
+    }
+    return framesPromise
   }
-  return framesPromise
 }
+
+export const loadDevFrames = createFrameLoader(devSpritesheetUrl)
+export const loadDevOpsFrames = createFrameLoader(devopsSpritesheetUrl)
+export const loadFloorManagerFrames = createFrameLoader(floorManagerSpritesheetUrl)

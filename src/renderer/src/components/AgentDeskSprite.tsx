@@ -1,14 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { Application, AnimatedSprite } from 'pixi.js'
-import { loadDevFrames } from '../pixi/devSpritesheet'
+import { loadDevFrames, loadDevOpsFrames, loadFloorManagerFrames } from '../pixi/devSpritesheet'
 
 type Props = {
   /** Play the idle/typing loop while the agent is actively working; hold on frame 0 otherwise. */
   animate: boolean
+  /** Which desk spritesheet to render. Defaults to the generic dev desk. */
+  variant?: 'dev' | 'devops' | 'floorManager'
   width?: number
 }
 
-export default function AgentDeskSprite({ animate, width = 90 }: Props): React.JSX.Element {
+const FRAME_LOADERS = {
+  dev: loadDevFrames,
+  devops: loadDevOpsFrames,
+  floorManager: loadFloorManagerFrames
+} as const
+
+export default function AgentDeskSprite({
+  animate,
+  variant = 'dev',
+  width = 90
+}: Props): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const spriteRef = useRef<AnimatedSprite | null>(null)
 
@@ -21,7 +33,7 @@ export default function AgentDeskSprite({ animate, width = 90 }: Props): React.J
     const app = new Application()
 
     async function setup(): Promise<void> {
-      const frames = await loadDevFrames()
+      const frames = await FRAME_LOADERS[variant]()
       if (cancelled) return
       const height = Math.round(width * (frames[0].height / frames[0].width))
 
@@ -59,7 +71,7 @@ export default function AgentDeskSprite({ animate, width = 90 }: Props): React.J
       if (initialized) app.destroy(true, { children: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width])
+  }, [width, variant])
 
   useEffect(() => {
     const sprite = spriteRef.current

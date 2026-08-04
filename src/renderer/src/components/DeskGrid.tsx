@@ -5,7 +5,7 @@ import FloorPicker from './FloorPicker'
 import DelegationOverlay from './DelegationOverlay'
 import AgentDeskSprite from './AgentDeskSprite'
 import floorTileImg from '../../../../resources/assets/floor.png'
-import ceoDeskImg from '../../../../resources/assets/CEO.png'
+import officeBgImg from '../../../../resources/assets/spritesheets/office/office_bg.png'
 
 type Props = {
   project: Project | null
@@ -295,7 +295,9 @@ export default function DeskGrid(props: Props): React.JSX.Element {
         {agent.isFloorManager ? (
           <>
             <div className="desk-card-name desk-card-ceo-name">{agent.name}</div>
-            <img className="desk-card-ceo-img" src={ceoDeskImg} alt="" draggable={false} />
+            <div className="desk-card-ceo-sprite-wrap">
+              <AgentDeskSprite animate={statusPulses(status as never)} variant="floorManager" />
+            </div>
             <div className="desk-card-ceo-status-row">
               <div
                 className="desk-card-status-dot"
@@ -315,7 +317,10 @@ export default function DeskGrid(props: Props): React.JSX.Element {
             <div className="desk-card-name">{agent.name}</div>
             <div className="desk-card-cubicle-wrap">
               <div className="desk-card-cubicle-inner">
-                <AgentDeskSprite animate={statusPulses(status as never)} />
+                <AgentDeskSprite
+                  animate={statusPulses(status as never)}
+                  variant={agent.icon === '⚙️' ? 'devops' : 'dev'}
+                />
                 <div className="desk-card-cubicle-icon" style={{ background: iconBg }}>
                   {agent.icon ?? agent.name[0]?.toUpperCase()}
                 </div>
@@ -487,6 +492,10 @@ export default function DeskGrid(props: Props): React.JSX.Element {
                       if (e.target === e.currentTarget) onDeselectAgent()
                     }}
                   >
+                    <div
+                      className="floor-canvas-bg"
+                      style={{ backgroundImage: `url(${officeBgImg})` }}
+                    />
                     {visibleAgents.map((agent) => renderDeskCard(agent))}
                   </div>
                 </div>
