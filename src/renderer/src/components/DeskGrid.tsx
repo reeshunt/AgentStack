@@ -3,9 +3,9 @@ import type { AgentInfo, DeskLayout, OrchestrationEvent, Project } from '../../.
 import { departmentColor, statusPulses, STATUS_COLORS, STATUS_LABELS, UNASSIGNED_DEPARTMENT } from '../theme'
 import FloorPicker from './FloorPicker'
 import DelegationOverlay from './DelegationOverlay'
+import AgentDeskSprite from './AgentDeskSprite'
 import floorTileImg from '../../../../resources/assets/floor.png'
 import ceoDeskImg from '../../../../resources/assets/CEO.png'
-import cubicleDeskImg from '../../../../resources/assets/cubicle.png'
 
 type Props = {
   project: Project | null
@@ -51,6 +51,17 @@ const DESK_HEIGHT = 130
 const DEFAULT_SPACING_X = 180
 const DEFAULT_SPACING_Y = 160
 const DEFAULT_GRID_Y = 24
+
+// Simulator-style scroll-wheel zoom on the office floor. Zooming out is capped at 10% below
+// the default view (not a wide-open "zoom to a dot") while zooming in has more headroom.
+const ZOOM_DEFAULT = 1
+const ZOOM_MIN = 0.9
+const ZOOM_MAX = 1.6
+const ZOOM_WHEEL_SENSITIVITY = 0.0015
+
+function clampZoom(value: number): number {
+  return Math.min(Math.max(value, ZOOM_MIN), ZOOM_MAX)
+}
 
 // Columns wrap to whatever actually fits the current canvas width instead of a fixed count,
 // and the final spot is clamped into the canvas bounds — otherwise a freshly generated agent
@@ -115,6 +126,7 @@ export default function DeskGrid(props: Props): React.JSX.Element {
   // the floor exactly fills the viewport with no scrollbar, instead of always padding out to
   // the large fixed canvas.
   const [viewportSize, setViewportSize] = useState({ width: 960, height: 640 })
+  const [zoom, setZoom] = useState(ZOOM_DEFAULT)
   // Whether the pointer moved enough during this press to count as a drag rather than a
   // click. Tracked in a ref (not state) so the click handler sees it synchronously — a
   // pointerup-triggered setState hasn't necessarily re-rendered yet by the time the
@@ -195,12 +207,35 @@ export default function DeskGrid(props: Props): React.JSX.Element {
       if (!prev) return prev
       const moved = prev.moved || Math.abs(e.movementX) + Math.abs(e.movementY) > 2
       if (moved) suppressClickRef.current = true
+      // Pointer movement is in screen pixels, but desk positions live in the floor-canvas's
+      // unscaled coordinate space (the canvas itself is what gets CSS-scaled) — so screen
+      // movement has to be un-zoomed before it's applied.
       return {
         ...prev,
-        x: clamp(prev.x + e.movementX, canvasWidth - DESK_WIDTH),
-        y: clamp(prev.y + e.movementY, canvasHeight - DESK_HEIGHT),
+        x: clamp(prev.x + e.movementX / zoom, canvasWidth - DESK_WIDTH),
+        y: clamp(prev.y + e.movementY / zoom, canvasHeight - DESK_HEIGHT),
         moved
       }
+    })
+  }
+
+  // Wheel-to-zoom, anchored on the pointer so the point under the cursor stays put — the
+  // same feel as a scroll-wheel zoom in a city-builder/simulator game.
+  function onFloorWheel(e: React.WheelEvent<HTMLDivElement>): void {
+    const container = canvasScrollRef.current
+    if (!container) return
+    e.preventDefault()
+    const rect = container.getBoundingClientRect()
+    const pointerX = e.clientX - rect.left + container.scrollLeft
+    const pointerY = e.clientY - rect.top + container.scrollTop
+    const prevZoom = zoom
+    const nextZoom = clampZoom(prevZoom - e.deltaY * ZOOM_WHEEL_SENSITIVITY)
+    if (nextZoom === prevZoom) return
+    const ratio = nextZoom / prevZoom
+    setZoom(nextZoom)
+    requestAnimationFrame(() => {
+      container.scrollLeft = pointerX * ratio - (e.clientX - rect.left)
+      container.scrollTop = pointerY * ratio - (e.clientY - rect.top)
     })
   }
 
@@ -280,7 +315,7 @@ export default function DeskGrid(props: Props): React.JSX.Element {
             <div className="desk-card-name">{agent.name}</div>
             <div className="desk-card-cubicle-wrap">
               <div className="desk-card-cubicle-inner">
-                <img className="desk-card-cubicle-img" src={cubicleDeskImg} alt="" draggable={false} />
+                <AgentDeskSprite animate={statusPulses(status as never)} />
                 <div className="desk-card-cubicle-icon" style={{ background: iconBg }}>
                   {agent.icon ?? agent.name[0]?.toUpperCase()}
                 </div>
@@ -335,6 +370,31 @@ export default function DeskGrid(props: Props): React.JSX.Element {
                 {runningCount} working
               </span>
               <span className="office-stat">{agents.length} agents on this floor</span>
+              <div className="zoom-controls">
+                <button
+                  className="zoom-button"
+                  onClick={() => setZoom((z) => clampZoom(z - 0.1))}
+                  disabled={zoom <= ZOOM_MIN}
+                  title="Zoom out"
+                >
+                  −
+                </button>
+                <button
+                  className="zoom-reset"
+                  onClick={() => setZoom(ZOOM_DEFAULT)}
+                  title="Reset zoom"
+                >
+                  {Math.round(zoom * 100)}%
+                </button>
+                <button
+                  className="zoom-button"
+                  onClick={() => setZoom((z) => clampZoom(z + 0.1))}
+                  disabled={zoom >= ZOOM_MAX}
+                  title="Zoom in"
+                >
+                  +
+                </button>
+              </div>
               <button className="add-agent-button" onClick={onAddAgent}>
                 + Add Agent
               </button>
@@ -408,16 +468,27 @@ export default function DeskGrid(props: Props): React.JSX.Element {
               <div
                 className="floor-canvas-scroll"
                 ref={canvasScrollRef}
-                style={needsScroll ? undefined : { overflow: 'hidden' }}
+                onWheel={onFloorWheel}
+                style={needsScroll || zoom !== 1 ? undefined : { overflow: 'hidden' }}
               >
                 <div
-                  className="floor-canvas"
-                  style={{ width: canvasWidth, height: canvasHeight }}
-                  onClick={(e) => {
-                    if (e.target === e.currentTarget) onDeselectAgent()
-                  }}
+                  className="floor-canvas-zoom-frame"
+                  style={{ width: canvasWidth * zoom, height: canvasHeight * zoom }}
                 >
-                  {visibleAgents.map((agent) => renderDeskCard(agent))}
+                  <div
+                    className="floor-canvas"
+                    style={{
+                      width: canvasWidth,
+                      height: canvasHeight,
+                      transform: `scale(${zoom})`,
+                      transformOrigin: '0 0'
+                    }}
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget) onDeselectAgent()
+                    }}
+                  >
+                    {visibleAgents.map((agent) => renderDeskCard(agent))}
+                  </div>
                 </div>
               </div>
             )}

@@ -284,7 +284,30 @@ body {
    canvas rather than grouped rows — department is now just a per-card tag
    (color dot + sidebar filter), not a layout concept. */
 .floor-canvas-scroll { flex: 1; overflow: auto; padding: var(--space-6); }
+/* Sized to the zoomed pixel footprint so the scrollbars reflect what's actually visible;
+   the unscaled .floor-canvas inside is scaled with a CSS transform so desk-card layout math
+   (drag positions, default grid slots) stays in simple, un-zoomed coordinates. */
+.floor-canvas-zoom-frame { position: relative; }
 .floor-canvas { position: relative; }
+
+.zoom-controls {
+  display: flex; align-items: center; gap: 2px; margin-left: var(--space-2);
+  border: 1px solid var(--color-neutral-800); border-radius: var(--radius-sm); overflow: hidden;
+}
+.zoom-button {
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+  background: var(--color-surface-raised); border: none; color: var(--color-neutral-300);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.zoom-button:hover:not(:disabled) { background: var(--color-neutral-800); color: var(--color-neutral-100); }
+.zoom-button:disabled { opacity: 0.35; cursor: default; }
+.zoom-reset {
+  min-width: 44px; height: 22px; padding: 0 6px; display: flex; align-items: center; justify-content: center;
+  background: var(--color-surface-raised); border: none; border-left: 1px solid var(--color-neutral-800);
+  border-right: 1px solid var(--color-neutral-800); color: var(--color-neutral-400); font-size: 10.5px;
+  cursor: pointer;
+}
+.zoom-reset:hover { color: var(--color-neutral-100); }
 
 .desk-card {
   position: absolute; width: 150px;
@@ -355,7 +378,8 @@ body {
 .desk-card-activity { font-size: 10.5px; color: var(--color-neutral-400); line-height: 1.4; text-align: center; }
 .desk-card-cubicle-wrap { display: flex; justify-content: center; }
 .desk-card-cubicle-inner { position: relative; width: 60%; }
-.desk-card-cubicle-img { width: 100%; height: auto; display: block; image-rendering: pixelated; -webkit-user-drag: none; }
+.desk-card-sprite-host { width: 100%; }
+.desk-card-sprite-host canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
 .desk-card-cubicle-icon {
   position: absolute; bottom: 6px; left: 6px; width: 22px; height: 22px; border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center; font-size: 13px;
@@ -569,20 +593,21 @@ body {
 .askq-deny { background: transparent; color: var(--color-neutral-300); border-color: var(--color-neutral-700); }
 .askq-deny:hover { border-color: var(--color-status-error); color: var(--color-status-error); }
 
-.chat-input-row { display: flex; flex-direction: column; gap: 8px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-divider); }
+.chat-input-row { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-divider); }
 .chat-input {
   flex: 1; background: var(--color-neutral-900); border: 1px solid var(--color-neutral-800);
   color: var(--color-text); padding: 9px 10px; border-radius: var(--radius-sm); font-size: 12.5px; font-family: inherit;
+  resize: vertical; min-height: 96px; max-height: 280px; line-height: 1.4;
 }
 .chat-send {
   background: var(--color-accent); color: var(--color-accent-ink); border: none; border-radius: var(--radius-sm);
-  padding: 7px 16px; cursor: pointer; font-size: 12px; font-weight: 600;
+  padding: 7px 16px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-end;
 }
 .chat-send:disabled { opacity: 0.4; cursor: default; }
 
 .chat-stop {
   background: transparent; color: var(--color-status-error); border: 1px solid var(--color-status-error);
-  border-radius: var(--radius-sm); padding: 7px 16px; cursor: pointer; font-size: 12px; font-weight: 600;
+  border-radius: var(--radius-sm); padding: 7px 16px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-end;
 }
 .chat-stop:hover:not(:disabled) { background: var(--color-status-error); color: var(--color-neutral-950, #0a0a0a); }
 .chat-stop:disabled { opacity: 0.6; cursor: default; }
